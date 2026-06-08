@@ -42,8 +42,10 @@ class Settings(BaseSettings):
     postgres_url: str
     redis_url: str
 
-    # Tracing collector endpoint.
-    phoenix_collector_endpoint: str
+    # Tracing collector endpoint (Phoenix). Optional: when unset/empty, tracing is disabled and the
+    # app runs untraced. Export is best-effort and must never block startup or requests, so a deploy
+    # without a Phoenix collector simply turns tracing off rather than spamming export retries.
+    phoenix_collector_endpoint: str | None = Field(default=None)
 
 
 @lru_cache

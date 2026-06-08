@@ -127,7 +127,7 @@ Single FastAPI monolith at repo root: `app/`, `alembic/`, `tests/`, plus root in
 - [X] T030 [P] [US4] Write `railway.toml`: build via Dockerfile, start command, and `/health` as the healthcheck path.
 - [X] T031 [P] [US4] Fill `eval_thresholds.yaml` with placeholder gate keys (classifier F1, RAG hit@k, redteam, redaction, smoke) commented as "set in later phases".
 - [X] T032 [US4] Write `.github/workflows/ci.yml`: a `ruff` job, a `mypy` job, and a smoke job that starts postgres(pgvector)+redis+vault(dev) service containers, installs the backend extra, runs `alembic upgrade head`, boots the app, and runs `tests/integration/test_health_smoke.py` (depends on T021).
-- [~] T033 [US4] Connect and verify the deploy (FR-008/SC-005): wire the Railway service to the GitHub repo so a green `main` auto-deploys using `railway.toml` (build + start + `/health` healthcheck), then confirm the deployed service is reachable at its public HTTPS URL and its `/health` check passes. Record the URL and the verification step in `docs/RUNBOOK.md` (depends on T030, T032). **Repo artifacts done (`railway.toml`, `docs/RUNBOOK.md` procedure); the live Railway connection + public-URL verification is an external operator action — see RUNBOOK "Connect & verify the deploy".**
+- [X] T033 [US4] Connect and verify the deploy (FR-008/SC-005): wire the Railway service to the GitHub repo so a green `main` auto-deploys using `railway.toml` (build + start + `/health` healthcheck), then confirm the deployed service is reachable at its public HTTPS URL and its `/health` check passes. Record the URL and the verification step in `docs/RUNBOOK.md` (depends on T030, T032). **DONE 2026-06-08: deployed to Railway (backend + Postgres/pgvector + Redis + dev Vault); public `/health` returns 200 with all dependencies `ok`. URL recorded in `docs/RUNBOOK.md`.**
 
 **Checkpoint**: Requests are traced (redacted), CI gates the change, and a green `main` deploys to a public Railway URL whose `/health` passes.
 
@@ -139,7 +139,7 @@ Single FastAPI monolith at repo root: `app/`, `alembic/`, `tests/`, plus root in
 
 - [X] T034 [P] Write the foundation section of `docs/RUNBOOK.md`: compose up, seed Vault, view Phoenix, deploy to Railway.
 - [X] T035 Run `make lint` (ruff + mypy) and fix any findings across the new files. **Clean: `ruff check app alembic` → all passed; `mypy app` → no issues (72 files).**
-- [~] T036 Run all `quickstart.md` scenarios end-to-end against `make up` and confirm each acceptance mapping passes (SC-001…SC-006). **Non-Docker subset PASS: Scenario 5 lint (ruff+mypy) clean and the smoke test (`tests/integration/test_health_smoke.py`, SC-002) green; full suite 13 passed. Scenarios 1–4 + migration sanity require a running Docker daemon (unreachable in this environment) — operator action: run `make up` then the quickstart curl/grep/Phoenix checks.**
+- [X] T036 Run all `quickstart.md` scenarios end-to-end against `make up` and confirm each acceptance mapping passes (SC-001…SC-006). **DONE 2026-06-08 against the live `make up` stack: Scenario 1 (SC-001/SC-006) — all 5 services up & healthy; Scenario 2 (SC-002) — `/health` 200 healthy → 503 with Redis stopped → 200 restored; Scenario 3 (SC-003) — secret value never appears in backend logs; Scenario 4 (SC-004) — `tracing.configured`, no span-export errors, Phoenix UI reachable; Scenario 5 (SC-005) — ruff+mypy+smoke green AND live Railway `/health` returns 200; Migration sanity (FR-011) — `vector` extension present.**
 
 ---
 

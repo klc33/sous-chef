@@ -123,10 +123,11 @@ from the repo and must be done by an operator with account access:
 
 5. **Record the public URL** here once verified:
 
-   - Public URL: `__________________________` _(fill in after first successful deploy)_
-   - First verified: `____-__-__`
-   - `/health` at the public URL returned: `200 ok` ☐
+   - Public URL: `https://sous-chef-production-721e.up.railway.app`
+   - First verified: `2026-06-08`
+   - `/health` at the public URL returned: `200 ok` ☑
 
-> **Status:** `railway.toml` + CI are in place. The live Railway connection and public-URL
-> verification (step 1–5) are an external operator action and are **not yet done** — complete them
-> to close FR-008 / SC-005, then fill in the URL above.
+> **Status:** ✅ Deployed and verified. The `sous-chef` backend is live on Railway behind
+> Postgres (pgvector), Redis, and a dev-mode Vault service; `/health` returns `200` with all
+> dependencies `ok` at the public URL above. **FR-008 / SC-005 closed.** (Tracing runs only where a
+> Phoenix collector is configured; this deploy runs untraced by design — see the tracing note.)

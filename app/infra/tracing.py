@@ -98,10 +98,17 @@ def configure_tracing(settings: Settings) -> Tracer | None:
     """Set up the global tracer provider exporting redacted spans to Phoenix; return a tracer.
 
     Builds a TracerProvider tagged with the service name + environment, attaches a batch
-    processor over the redacting exporter, and installs it globally. Any failure (missing OTLP
-    extra, bad config) is logged and yields None so the caller can run untraced — tracing is
-    never allowed to break startup or a request (Decision 7).
+    processor over the redacting exporter, and installs it globally. When no collector endpoint is
+    configured, tracing is disabled (returns None) so a deploy without Phoenix doesn't spam export
+    retries. Any failure (missing OTLP extra, bad config) is logged and also yields None — tracing
+    is never allowed to break startup or a request (Decision 7).
     """
+    endpoint = settings.phoenix_collector_endpoint
+    if not endpoint:
+        # No Phoenix collector configured for this deploy — run untraced rather than retrying
+        # span exports against a dead endpoint.
+        log.info("tracing.disabled", reason="PHOENIX_COLLECTOR_ENDPOINT not set")
+        return None
     try:
         from opentelemetry import trace
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -113,11 +120,11 @@ def configure_tracing(settings: Settings) -> Tracer | None:
             {"service.name": _SERVICE_NAME, "deployment.environment": settings.env}
         )
         provider = TracerProvider(resource=resource)
-        exporter = OTLPSpanExporter(endpoint=_traces_endpoint(settings.phoenix_collector_endpoint))
+        exporter = OTLPSpanExporter(endpoint=_traces_endpoint(endpoint))
         redacting = cast("SpanExporter", _RedactingSpanExporter(exporter))
         provider.add_span_processor(BatchSpanProcessor(redacting))
         trace.set_tracer_provider(provider)
-        log.info("tracing.configured", endpoint=settings.phoenix_collector_endpoint)
+        log.info("tracing.configured", endpoint=endpoint)
         return trace.get_tracer(_SERVICE_NAME)
     except Exception as exc:  # never let tracing setup abort startup
         log.warning("tracing.setup_failed", error=str(exc))
