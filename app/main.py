@@ -14,6 +14,7 @@ import structlog
 from fastapi import FastAPI
 
 from app.api.health import register_health_router
+from app.api.user import register_user_routers
 from app.config import get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
 
     register_error_handlers(app)
     register_health_router(app)
+    register_user_routers(app)
 
     return app
 

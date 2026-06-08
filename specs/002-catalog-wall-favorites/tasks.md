@@ -96,14 +96,14 @@ Single FastAPI monolith at repo root: `app/`, `alembic/`, `ingestion/`, `tests/`
 
 ### Tests for User Story 1
 
-- [ ] T027 [P] [US1] Unit-test the wall in `tests/unit/test_constraint_guard.py`: `violates` for an allergen hit, **fail-closed** on `allergen_certain = false`, each diet (vegan/vegetarian/pescatarian) and `diet=none`; `filter` drops violators and keeps compliant.
-- [ ] T028 [US1] Integration test `tests/integration/test_recipes_flow.py`: seed compliant + violating recipes across multiple categories; nut-allergic profile via `X-Profile-ID` browses → only compliant cards (title + key ingredients) AND **every returned card's `category` equals the requested category** (category purity, SC-005); no-constraint profile sees all; empty-compliant category returns `[]`.
+- [X] T027 [P] [US1] Unit-test the wall in `tests/unit/test_constraint_guard.py`: `violates` for an allergen hit, **fail-closed** on `allergen_certain = false`, each diet (vegan/vegetarian/pescatarian) and `diet=none`; `filter` drops violators and keeps compliant.
+- [X] T028 [US1] Integration test `tests/integration/test_recipes_flow.py`: seed compliant + violating recipes across multiple categories; nut-allergic profile via `X-Profile-ID` browses → only compliant cards (title + key ingredients) AND **every returned card's `category` equals the requested category** (category purity, SC-005); no-constraint profile sees all; empty-compliant category returns `[]`.
 
 ### Implementation for User Story 1
 
-- [ ] T029 [US1] Implement `app/api/user/profile.py`: `GET /profile` (returns defaults — `none`/no allergies/servings 2 — when unset) and `PUT /profile` (validate diet/allergens/servings, upsert) via `repo.profiles` + `deps.require_profile_id` (depends T009, T012).
-- [ ] T030 [US1] Implement `app/api/user/recipes.py`: `GET /recipes?category=` → resolve `ConstraintProfile` from `repo.profiles.get` (or default) → `repo.recipes.list_by_category` → `recipe_view.to_cards(cp)` → 200 list (depends T008, T013, T014, T012).
-- [ ] T031 [US1] Create `app/api/user/__init__.py` with `register_user_routers(app)` (profile + recipes routers) and call it from `create_app` in `app/main.py` (depends T029, T030).
+- [X] T029 [US1] Implement `app/api/user/profile.py`: `GET /profile` (returns defaults — `none`/no allergies/servings 2 — when unset) and `PUT /profile` (validate diet/allergens/servings, upsert) via `repo.profiles` + `deps.require_profile_id` (depends T009, T012).
+- [X] T030 [US1] Implement `app/api/user/recipes.py`: `GET /recipes?category=` → resolve `ConstraintProfile` from `repo.profiles.get` (or default) → `repo.recipes.list_by_category` → `recipe_view.to_cards(cp)` → 200 list (depends T008, T013, T014, T012).
+- [X] T031 [US1] Create `app/api/user/__init__.py` with `register_user_routers(app)` (profile + recipes routers) and call it from `create_app` in `app/main.py` (depends T029, T030).
 
 **Checkpoint**: A cook can set constraints and browse safe, real cards in each category — the safe MVP. Deployable.
 
@@ -117,13 +117,13 @@ Single FastAPI monolith at repo root: `app/`, `alembic/`, `ingestion/`, `tests/`
 
 ### Tests for User Story 2
 
-- [ ] T032 [P] [US2] Unit-test `tests/unit/test_nutrition_scaling.py`: scaling from `basis_servings` to cook servings and `is_approximate` passthrough.
-- [ ] T033 [US2] Extend `tests/integration/test_recipes_flow.py`: open a card → verbatim steps + scaled nutrition; a recipe violating the profile → `GET /recipes/{id}` returns 404 (no bypass, no existence leak).
+- [X] T032 [P] [US2] Unit-test `tests/unit/test_nutrition_scaling.py`: scaling from `basis_servings` to cook servings and `is_approximate` passthrough.
+- [X] T033 [US2] Extend `tests/integration/test_recipes_flow.py`: open a card → verbatim steps + scaled nutrition; a recipe violating the profile → `GET /recipes/{id}` returns 404 (no bypass, no existence leak).
 
 ### Implementation for User Story 2
 
-- [ ] T034 [P] [US2] Implement `app/services/user/nutrition.py`: `scale(nutrition_cache_row, cook_servings)` → `NutritionSummary` (calories + macros), preserving `is_approximate` (depends T007).
-- [ ] T035 [US2] Add `GET /recipes/{id}` to `app/api/user/recipes.py`: `repo.recipes.get_by_id`; if missing OR `violates(cp)` → 404; else `recipe_view.to_detail(cp, is_favorite=…, nutrition=scaled)` with verbatim steps (depends T013, T014, T034, T010).
+- [X] T034 [P] [US2] Implement `app/services/user/nutrition.py`: `scale(nutrition_cache_row, cook_servings)` → `NutritionSummary` (calories + macros), preserving `is_approximate` (depends T007).
+- [X] T035 [US2] Add `GET /recipes/{id}` to `app/api/user/recipes.py`: `repo.recipes.get_by_id`; if missing OR `violates(cp)` → 404; else `recipe_view.to_detail(cp, is_favorite=…, nutrition=scaled)` with verbatim steps (depends T013, T014, T034, T010).
 
 **Checkpoint**: US1 + US2 work — browse and cook a recipe, grounded and safe.
 
