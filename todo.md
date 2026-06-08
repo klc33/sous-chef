@@ -56,9 +56,22 @@ working option for a demo:
 - [ ] Project canvas → **New → Empty Service**.
 - [ ] **Settings → Source → Image**: `hashicorp/vault:latest`.
 - [ ] **Settings → Deploy → Custom Start Command**:
-      `server -dev -dev-listen-address=0.0.0.0:8200`
+      `/bin/sh -c 'vault server -dev -dev-listen-address=0.0.0.0:8200'`
+  - The custom start command **overrides the image entrypoint** (the `vault` binary), so you must
+        name the binary in full — `vault server …`, not just `server …`. Otherwise Railway tries to
+        exec a binary literally named `server` and fails.
+  - Listen on a **fixed 8200** so it matches the domain's target port (next bullet). (You *can* use
+        `$PORT` instead, but only if Railway's `PORT` for this service equals the domain port — fixed
+        8200 avoids that ambiguity.)
 - [ ] **Variables** (on the Vault service): add `VAULT_DEV_ROOT_TOKEN_ID` = `root`.
-- [ ] **Settings → Networking**: note its **private** address, e.g. `vault.railway.internal` (port `8200`).
+- [ ] **Settings → Networking → Generate Domain** → set the **target port to `8200`** (must equal
+      Vault's listen port above). Gives Vault a public HTTPS URL like `https://<vault>.up.railway.app`
+      (HTTPS on 443 externally → forwards to 8200 inside). You'll point the backend's `VAULT_ADDR` at
+      this in Step 5 — **with no `:8200`** (that port is internal).
+  - ⚠️ **Security:** this exposes a dev-mode Vault (root token `root`) to the internet — acceptable
+        only for a throwaway demo. Private-network alternative: start with
+        `-dev-listen-address=[::]:8200` (IPv6, no public domain) and set
+        `VAULT_ADDR=http://${{Vault.RAILWAY_PRIVATE_DOMAIN}}:8200`.
 - [ ] Seeding is automatic — the backend's start command runs `scripts/seed_vault.sh` on every boot.
 
 > Production-grade Vault (HCP Vault or a sealed instance with real secrets) is the Phase 5
@@ -68,17 +81,21 @@ working option for a demo:
 
 ## 5. Set the backend service variables
 
-Open the **backend** service → **Variables** → add each. Use Railway variable references where
-shown so they stay in sync.
+Open the **backend service — this is the `sous-chef` service you deployed from GitHub in Step 1**
+(the one that builds the Dockerfile / runs the FastAPI app), **not** Vault/Postgres/Redis. Go to its
+**Variables** tab → add each. Use Railway variable references where shown so they stay in sync.
 
 - [ ] `ENV` = `production`
-- [ ] `VAULT_ADDR` = `http://vault.railway.internal:8200`  *(your Vault private URL from Step 4)*
+- [ ] `VAULT_ADDR` = the Vault **public** URL from Step 4, e.g. `https://<vault>.up.railway.app`
+      *(no port — Railway's edge serves HTTPS on 443 and forwards to Vault's `$PORT`)*. If you took
+      the private-network route instead, use `http://${{Vault.RAILWAY_PRIVATE_DOMAIN}}:8200`.
 - [ ] `VAULT_TOKEN` = `root`  *(the dev root token from Step 4)*
-- [ ] `POSTGRES_URL` = the Railway Postgres URL **with the driver prefix rewritten** to
-      `postgresql+psycopg://…`
-  - Railway gives `postgresql://user:pass@host:port/db`. You must change the scheme to
-        `postgresql+psycopg://` (same rest of the string). Example using a reference:
-        `postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.PGDATABASE}}`
+- [ ] `POSTGRES_URL` = the Railway Postgres URL **with the driver scheme rewritten** to
+      `postgresql+psycopg://` (the app uses the psycopg3 driver; Railway gives plain `postgresql://`).
+      Rebuild it from Railway's PG references (swap `Postgres` for your service's name):
+        `postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}`
+  - `PGHOST` is the **private** internal address, so DB traffic stays inside Railway. The only literal
+        change vs. the URL Railway gives you is the `+psycopg` in the scheme.
 - [ ] `REDIS_URL` = `${{Redis.REDIS_URL}}`  *(reference the Redis service)*
 - [ ] `PHOENIX_COLLECTOR_ENDPOINT` = `http://localhost:6006`
   - This field is **required** by config but tracing is best-effort; a placeholder is fine and the

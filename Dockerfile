@@ -17,16 +17,14 @@ RUN apt-get update \
 # 1) Dependency layer (cached): resolve ONLY the backend extra from the frozen lockfile,
 #    without installing the project source yet, so this layer is reused across code changes.
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --extra backend
+RUN uv sync --frozen --no-install-project --no-dev --extra backend
 
 # 2) App layer: copy the source the backend actually needs, then finalize the environment.
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra backend
+RUN uv sync --frozen --no-dev --extra backend
 
 ENV PATH="/srv/.venv/bin:$PATH"
 EXPOSE 8000
