@@ -4,8 +4,10 @@ AI recipe-discovery assistant for home cooks who want to try something new. A co
 retrieved recipes** (a list of cards → click for full text steps), can build a varied meal plan + a
 shopping list, and saves favorites. Solo 2-week project.
 
-Full design: [amer_idea-1.md](amer_idea-1.md) · stack: [amer_idea-1-tech.md](amer_idea-1-tech.md) ·
-models: [model_role.md](model_role.md) · file layout: [structure.md](structure.md).
+Full design: [amer_idea-1.md](projectplanFolderForMd/amer_idea-1.md) · stack:
+[amer_idea-1-tech.md](projectplanFolderForMd/amer_idea-1-tech.md) · models:
+[model_role.md](projectplanFolderForMd/model_role.md) · file layout:
+[structure.md](projectplanFolderForMd/structure.md).
 
 ## Golden rules (do not break these)
 1. **The wall is the grade.** Never surface a recipe that violates the cook's stated allergy/diet. It's
@@ -48,7 +50,7 @@ Offline-only (never shipped): `ml/` (training) · `ingestion/` (corpus pipeline)
 ## Commands
 **Python deps: use `uv` only — never `pip`.** `uv venv` creates `.venv`; `uv sync` installs from the lock;
 `uv run <cmd>` runs in `.venv`. Deps live in `pyproject.toml` + `uv.lock` (no `requirements.txt`).
-**Always add deps into the right group** so each image stays lean ([dependencies.md](dependencies.md)):
+**Always add deps into the right group** so each image stays lean ([dependencies.md](projectplanFolderForMd/dependencies.md)):
 `uv add --optional backend <pkg>`, `uv add --optional dashboard <pkg>`, `uv add --group <dev|test|ingestion|ml|evals> <pkg>`.
 Images build with `uv sync --frozen --no-dev --extra backend` (or `--extra dashboard`). No `torch` in any image.
 ```
