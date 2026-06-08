@@ -137,12 +137,12 @@ Single FastAPI monolith at repo root: `app/`, `alembic/`, `ingestion/`, `tests/`
 
 ### Tests for User Story 3
 
-- [ ] T036 [US3] Integration test `tests/integration/test_favorites.py`: save/list/remove; idempotent double-save; persistence across a fresh client with the same `X-Profile-ID`; after adding a violating allergy via `PUT /profile`, the favorite is omitted from `GET /favorites` (wall on the list).
+- [X] T036 [US3] Integration test `tests/integration/test_favorites.py`: save/list/remove; idempotent double-save; persistence across a fresh client with the same `X-Profile-ID`; after adding a violating allergy via `PUT /profile`, the favorite is omitted from `GET /favorites` (wall on the list).
 
 ### Implementation for User Story 3
 
-- [ ] T037 [US3] Implement `app/services/user/favorites.py`: `save` (idempotent via `repo.favorites.add`), `list` (resolve `cp`, fetch saved recipes, run `constraint_guard.filter`, build cards via `recipe_view.to_cards`), `remove` (depends T010, T013, T014).
-- [ ] T038 [US3] Implement `app/api/user/favorites.py`: `POST` (404 if recipe_id unknown, else 201 idempotent), `GET` (guarded cards), `DELETE /{recipe_id}` (204 idempotent); register the router in `app/api/user/__init__.py` (depends T037, T031).
+- [X] T037 [US3] Implement `app/services/user/favorites.py`: `save` (idempotent via `repo.favorites.add`), `list` (resolve `cp`, fetch saved recipes, run `constraint_guard.filter`, build cards via `recipe_view.to_cards`), `remove` (depends T010, T013, T014).
+- [X] T038 [US3] Implement `app/api/user/favorites.py`: `POST` (404 if recipe_id unknown, else 201 idempotent), `GET` (guarded cards), `DELETE /{recipe_id}` (204 idempotent); register the router in `app/api/user/__init__.py` (depends T037, T031).
 
 **Checkpoint**: All three stories are independently functional.
 

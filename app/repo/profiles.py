@@ -19,6 +19,22 @@ def get(session: Session, profile_id: str) -> Profile | None:
     ).scalar_one_or_none()
 
 
+def ensure_exists(session: Session, profile_id: str) -> Profile:
+    """Return the cook's profile row, inserting a permissive-default one if it does not exist yet.
+
+    Used by paths that must satisfy the `favorites.profile_id` FK without first requiring a PUT /profile:
+    saving a favorite is often a brand-new cook's first action. An existing row is returned UNCHANGED
+    (constraints are never clobbered) — the column defaults (diet=none, no allergies, servings=2) only
+    apply when a new row is created.
+    """
+    profile = get(session, profile_id)
+    if profile is None:
+        profile = Profile(profile_id=profile_id)
+        session.add(profile)
+        session.flush()
+    return profile
+
+
 def upsert(
     session: Session,
     profile_id: str,
