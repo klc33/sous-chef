@@ -1,0 +1,49 @@
+# Keep the backend build context small and secret-free.
+.git/
+.github/
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Secrets must never enter an image
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+
+# Other surfaces / offline-only trees the backend image doesn't need
+widget/
+dashboard/
+ml/
+ingestion/
+evals/
+docs/
+projectplanFolderForMd/
+specs/
+tests/
+
+# Local trace store / scratch
+.phoenix/
+phoenix-data/
+traces/
+node_modules/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

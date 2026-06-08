@@ -181,6 +181,7 @@ Documentation-first. P9 Spec-driven development (no vibe coding). P10 No unneces
 features (no torch in any container; no dedicated vector DB; no Kubernetes; no full end-user auth).
 The non-negotiables: never surface a recipe that violates a stated allergy/diet; never invent recipes or
 steps; LLM and embeddings are hosted-API calls; the trained classifier is served lean via joblib.
+keep the code clean and simple and use clear naming for the files and folders.
 ```
 
 ---

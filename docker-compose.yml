@@ -1,0 +1,87 @@
+# Local development stack for SousChef: five services brought up with one command.
+# Backend starts only after Postgres, Redis, and Vault report healthy (depends_on), then runs
+# the Alembic baseline, seeds dev Vault secrets, and launches uvicorn. See README Quickstart.
+
+services:
+  backend:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    # Migrate → seed Vault → serve. Seeding must precede uvicorn because app startup loads
+    # secrets from Vault and fails fast if they are absent.
+    command: >
+      sh -c "alembic upgrade head &&
+             sh scripts/seed_vault.sh &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: souschef
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Runs once on first init: creates the `phoenix` schema for Phoenix's trace store.
+      - ./scripts/init_phoenix_schema.sql:/docker-entrypoint-initdb.d/init_phoenix_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d souschef"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  vault:
+    image: hashicorp/vault:latest
+    # Dev mode: auto-unsealed, in-memory, fixed root token. NEVER use -dev in production.
+    command: server -dev
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    # Phoenix persists its trace store in the SAME Postgres instance (constitution P5/P10), but in
+    # its OWN schema so its Alembic migrations don't collide with the app's alembic_version table
+    # in `public`. The schema is auto-created by the postgres init script (scripts/init_phoenix_schema.sql).
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/souschef
+      PHOENIX_SQL_DATABASE_SCHEMA: phoenix
+    ports:
+      - "6006:6006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

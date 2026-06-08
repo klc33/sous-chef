@@ -80,6 +80,7 @@ injection/jailbreak probes must all be refused) and the **redaction** test. Then
 the running stack (`make up`).
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+Active feature: **001-foundation**. For technologies, project structure, shell commands, and other
+context for the current work, read the plan at `specs/001-foundation/plan.md` (with its `research.md`,
+`data-model.md`, `contracts/`, and `quickstart.md`).
 <!-- SPECKIT END -->

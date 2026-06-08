@@ -1,0 +1,84 @@
+openapi: 3.1.0
+info:
+  title: Sous-Chef Foundation API
+  version: 0.1.0
+  description: >
+    Foundation-phase contract. Exposes only the readiness health endpoint. No cook-facing
+    or admin endpoints exist in this phase. All responses are non-secret by construction.
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Readiness check over critical dependencies
+      description: >
+        Returns 200 only when the service can reach all critical dependencies
+        (Postgres, Redis, Vault). Returns 503 when any critical dependency is
+        unreachable. Used by operators and as the deploy-platform healthcheck.
+        Never includes secret values.
+      responses:
+        "200":
+          description: Service is ready; all critical dependencies reachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              examples:
+                healthy:
+                  value:
+                    status: ok
+                    env: local
+                    version: "0.1.0"
+                    dependencies:
+                      postgres: ok
+                      redis: ok
+                      vault: ok
+        "503":
+          description: Service is not ready; at least one critical dependency is unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              examples:
+                degraded:
+                  value:
+                    status: unhealthy
+                    env: local
+                    version: "0.1.0"
+                    dependencies:
+                      postgres: ok
+                      redis: unreachable
+                      vault: ok
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      additionalProperties: false
+      required: [status, dependencies]
+      properties:
+        status:
+          type: string
+          enum: [ok, unhealthy]
+          description: Overall readiness. `ok` ⇔ HTTP 200; `unhealthy` ⇔ HTTP 503.
+        env:
+          type: string
+          description: Non-secret environment name (e.g. local, production).
+        version:
+          type: string
+          description: Application version string.
+        dependencies:
+          type: object
+          additionalProperties: false
+          required: [postgres, redis, vault]
+          properties:
+            postgres:
+              $ref: "#/components/schemas/DependencyState"
+            redis:
+              $ref: "#/components/schemas/DependencyState"
+            vault:
+              $ref: "#/components/schemas/DependencyState"
+    DependencyState:
+      type: string
+      enum: [ok, unreachable]
+      description: Reachability of a single critical dependency.

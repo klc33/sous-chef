@@ -1,0 +1,26 @@
+# Railway deploy config for the SousChef backend (US4 / FR-008 / SC-005).
+# Build from the repo Dockerfile, start uvicorn, and gate the deploy on the /health readiness
+# endpoint so a new release only goes live once its critical dependencies are reachable.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Mirror docker-compose's backend command so a Railway deploy is self-sufficient: apply the DB
+# migration (vector extension + schema), seed the dev Vault, then serve. Without the first two
+# steps the app fails fast at startup (unmigrated DB / unseeded Vault). $PORT is injected by Railway.
+#
+# NOTE: seed_vault.sh writes DEV PLACEHOLDER secrets and is idempotent (safe to re-run on each
+# boot). It is here for the dev-Vault demo posture; once a real seeded Vault is provisioned
+# (Phase 5), drop the seed step and let the platform manage secrets.
+startCommand = "sh -c 'alembic upgrade head && sh scripts/seed_vault.sh && uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
+
+# Health-check-gated deploy: Railway polls /health and only promotes the new deployment once it
+# returns 200 (all of Postgres/Redis/Vault reachable). A 503 holds the rollout — no false-healthy.
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+
+# Restart on failure with a bounded number of retries before the deploy is marked failed.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

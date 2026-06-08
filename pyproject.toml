@@ -1,0 +1,91 @@
+[project]
+name = "sous-chef"
+version = "0.1.0"
+description = "SousChef — AI recipe-discovery assistant (FastAPI monolith)"
+requires-python = ">=3.11"
+
+# Shared base — the small set EVERY Python surface imports (config/schemas/HTTP/logging).
+dependencies = [
+  "pydantic",
+  "pydantic-settings",
+  "httpx",
+  "structlog",
+]
+
+[project.optional-dependencies]
+# ── BACKEND IMAGE (the FastAPI monolith) ──────────────────────────────────────
+# Foundation phase keeps this to the lean set the skeleton actually boots with.
+# Later phases add their own libs via `uv add --optional backend <pkg>`. No torch — ever.
+backend = [
+  "fastapi",
+  "uvicorn[standard]",
+  "sqlalchemy",
+  "alembic",
+  "psycopg[binary]",                 # Postgres driver
+  "pgvector",                        # vector column + search
+  "redis",                           # cache / session memory
+  "hvac",                            # Vault secrets adapter
+  "opentelemetry-sdk",               # tracing
+  "openinference-instrumentation",
+  "arize-phoenix-otel",              # exporter to the Phoenix service (NOT the Phoenix server)
+  "presidio-analyzer",               # PII detection (wired in a later phase)
+  "presidio-anonymizer",             # PII redaction (wired in a later phase)
+]
+
+[dependency-groups]
+# These NEVER ship in a serving image — local/CI/job only.
+dev  = ["ruff", "mypy"]
+test = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.uv]
+default-groups = ["dev"]   # local `uv sync` includes dev tools; images pass --no-dev to skip them
+
+# ── Tooling ───────────────────────────────────────────────────────────────────
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "tests", "alembic"]
+
+[tool.ruff.lint]
+# A sensible, not-overbearing baseline for the app package.
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "I",   # isort (import ordering)
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "SIM", # flake8-simplify
+]
+ignore = [
+  "E501",  # line length is enforced by the formatter, not the linter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use assert-heavy patterns and reimport fixtures freely.
+"tests/**" = ["B011"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+no_implicit_optional = true
+check_untyped_defs = true
+# Pragmatic strictness for a skeleton: require typed signatures in our own code,
+# but don't fail on the many external libs that ship without stubs yet.
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Alembic migration scripts are generated/templated; don't hold them to app strictness.
+module = ["alembic.*"]
+disallow_untyped_defs = false

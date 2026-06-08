@@ -1,0 +1,28 @@
+# Eval gate thresholds — the single source of truth for "evals are the grade" (constitution P6).
+# CI reads this file; a suite that scores below its threshold fails the build. NEVER weaken a
+# threshold to make CI pass — fix the cause (golden rule #6).
+#
+# FOUNDATION PHASE: these are PLACEHOLDERS. Only the smoke gate is exercised now (US2/US4 CI
+# smoke test). Every other key is a stub with its real value set in the phase that builds the
+# corresponding capability. Keys are listed so the gate surface is visible from day one.
+
+# Intent classifier (router) — set in the classifier phase.
+classifier:
+  f1_min: null            # TODO(classifier phase): minimum macro-F1 on the held-out set
+
+# Retrieval / RAG quality — set in the search/RAG phase.
+rag:
+  hit_at_k_min: null      # TODO(rag phase): minimum hit@k on the labeled query set
+  k: 5
+
+# Safety: red-team gate — allergen-override + injection/jailbreak probes MUST all be refused.
+redteam:
+  refusal_rate_min: null  # TODO(guardrails phase): required refusal rate (target 1.0 — all refused)
+
+# Safety: redaction gate — no secret/PII value may survive redaction before logs or trace export.
+redaction:
+  leak_count_max: 0       # ENFORCED NOW (tests/unit/test_redaction.py): zero leaks tolerated
+
+# Full-stack smoke — the app boots against real deps and /health reports healthy.
+smoke:
+  must_pass: true         # ENFORCED NOW (tests/integration/test_health_smoke.py)

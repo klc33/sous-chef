@@ -1,0 +1,108 @@
+# CI gates for SousChef (US4 / FR-009 / SC-005): lint, type-check, and a full-stack smoke test.
+# A green run is the precondition for the Railway auto-deploy of `main`. Thresholds and gates are
+# never weakened to make CI pass (golden rule #6) — a red gate means fix the cause.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ── Fast static gate: import order + lint (ruff), mirrors `make lint` (ruff half) ──
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Ruff lint
+        run: uv run ruff check app alembic
+
+  # ── Fast static gate: type-check (mypy), mirrors `make lint` (mypy half) ──
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install backend deps (types resolve against real libs)
+        run: uv sync --frozen --extra backend
+      - name: Mypy type-check
+        run: uv run mypy app
+
+  # ── Full-stack smoke: real Postgres+Redis+Vault, run the migration, boot the app, hit /health ──
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      ENV: ci
+      VAULT_ADDR: http://localhost:8200
+      VAULT_TOKEN: root
+      POSTGRES_URL: postgresql+psycopg://postgres:postgres@localhost:5432/souschef
+      REDIS_URL: redis://localhost:6379/0
+      PHOENIX_COLLECTOR_ENDPOINT: http://localhost:6006
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: souschef
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d souschef"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Vault dev mode can't run as a service container (it needs the `server -dev` command),
+      # so start it as a step and seed the app's dev secrets exactly as compose does.
+      - name: Start Vault (dev) and seed secrets
+        run: |
+          docker run -d --name vault -p 8200:8200 --cap-add=IPC_LOCK \
+            -e VAULT_DEV_ROOT_TOKEN_ID=root \
+            hashicorp/vault:latest server -dev -dev-listen-address=0.0.0.0:8200
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:8200/v1/sys/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          sh scripts/seed_vault.sh
+
+      - name: Install backend + test deps
+        run: uv sync --frozen --extra backend --group test
+
+      - name: Apply database migrations (baseline → vector extension)
+        run: uv run alembic upgrade head
+
+      # Real boot against the live stack: the app loads secrets from Vault, connects DB/cache,
+      # and /health must report 200 with every dependency reachable (SC-002 / SC-005).
+      - name: Boot the app and smoke /health
+        run: |
+          uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
+          echo "GET /health -> $code"
+          test "$code" = "200"
+
+      - name: Run the smoke test suite
+        run: uv run pytest tests/integration/test_health_smoke.py -q
