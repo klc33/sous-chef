@@ -44,7 +44,9 @@ ml/artifacts/
 *.pkl
 
 # ─── Ingestion / corpus scratch data ─────────────────────────────────────────
-ingestion/data/
+# Ignore the downloaded datasets but keep the README that documents what goes here.
+ingestion/data/*
+!ingestion/data/README.md
 ingestion/cache/
 *.parquet
 data/raw/

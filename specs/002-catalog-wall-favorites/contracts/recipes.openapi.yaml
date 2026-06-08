@@ -1,0 +1,113 @@
+openapi: 3.1.0
+info:
+  title: SousChef — Recipes (catalog browse & detail)
+  version: 0.2.0
+  description: >
+    Cook-facing recipe browse and detail. Every response is filtered by the safety wall against the
+    caller's profile constraints (resolved from the X-Profile-ID header). A recipe withheld by the wall
+    is indistinguishable from a non-existent one (404) so the wall never leaks existence.
+
+components:
+  parameters:
+    ProfileId:
+      name: X-Profile-ID
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+      description: Passwordless cook identity. Constraints/favorites are scoped to it; never taken from the body.
+  schemas:
+    Category:
+      type: string
+      enum: [hot_drink, cold_drink, breakfast, lunch, dinner]
+    NutritionSummary:
+      type: object
+      required: [calories, protein_g, carbs_g, fat_g, is_approximate, servings]
+      properties:
+        servings: { type: integer, description: Servings these values are scaled to (the cook's default). }
+        calories: { type: number }
+        protein_g: { type: number }
+        carbs_g: { type: number }
+        fat_g: { type: number }
+        is_approximate: { type: boolean, description: true when some ingredients could not be mapped. }
+    RecipeCard:
+      type: object
+      required: [id, title, category, key_ingredients]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
+        key_ingredients:
+          type: array
+          items: { type: string }
+        image_url: { type: string, nullable: true }
+    RecipeDetail:
+      type: object
+      required: [id, title, category, servings, steps, ingredients, nutrition, allergens, is_favorite]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
+        cuisine: { type: string, nullable: true }
+        total_time_minutes: { type: integer, nullable: true }
+        servings: { type: integer }
+        steps:
+          type: array
+          items: { type: string }
+          description: Stored steps rendered verbatim — never rewritten or invented.
+        ingredients:
+          type: array
+          items:
+            type: object
+            required: [name, raw_text]
+            properties:
+              name: { type: string }
+              quantity: { type: number, nullable: true }
+              unit: { type: string, nullable: true }
+              raw_text: { type: string }
+        nutrition: { $ref: '#/components/schemas/NutritionSummary' }
+        allergens:
+          type: array
+          items: { type: string }
+        is_favorite: { type: boolean }
+
+paths:
+  /recipes:
+    get:
+      summary: List real recipe cards in one category, filtered by the wall.
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+        - name: category
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Category' }
+      responses:
+        '200':
+          description: >
+            Compliant cards for the category. MAY be an empty array when no recipe satisfies the cook's
+            constraints — an honest empty result, never a substitute.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RecipeCard' }
+        '400': { description: Missing/invalid X-Profile-ID or category. }
+  /recipes/{id}:
+    get:
+      summary: Full stored steps + scaled nutrition for one recipe, subject to the wall.
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The recipe detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecipeDetail' }
+        '400': { description: Missing/invalid X-Profile-ID. }
+        '404':
+          description: >
+            Not found OR withheld by the wall (a recipe violating the cook's constraints is returned as
+            404 so the detail path cannot bypass the wall or reveal existence).

@@ -35,6 +35,11 @@ backend = [
 [dependency-groups]
 # These NEVER ship in a serving image — local/CI/job only.
 dev  = ["ruff", "mypy"]
+# Offline corpus pipeline only (TheMealDB/TheCocktailDB/Kaggle → categorize → embed). Never shipped.
+# httpx for the source/OFF calls comes from the shared base; pandas subsets the Kaggle CSV.
+ingestion = [
+    "pandas>=3.0.3",
+]
 test = ["pytest", "pytest-asyncio", "httpx"]
 
 [tool.uv]

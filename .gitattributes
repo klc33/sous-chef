@@ -1,0 +1,8 @@
+# Shell scripts MUST use LF, even on Windows checkouts — the containers run them with `sh` (dash),
+# which fails on CRLF line endings ("set: Illegal option"). Force LF regardless of platform/autocrlf.
+*.sh text eol=lf
+
+# Other files that are executed/parsed by Linux tooling inside the image; keep them LF too.
+Dockerfile text eol=lf
+*.sql text eol=lf
+Makefile text eol=lf

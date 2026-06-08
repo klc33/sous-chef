@@ -1,0 +1,73 @@
+openapi: 3.1.0
+info:
+  title: SousChef — Favorites
+  version: 0.2.0
+  description: >
+    Per-profile favorites CRUD. Persists across sessions keyed to X-Profile-ID. Saving is idempotent.
+    The list path is subject to the safety wall: a saved recipe that violates the cook's current
+    constraints is not surfaced.
+
+components:
+  parameters:
+    ProfileId:
+      name: X-Profile-ID
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+
+paths:
+  /favorites:
+    post:
+      summary: Save a recipe to favorites (idempotent).
+      parameters: [ { $ref: '#/components/parameters/ProfileId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipe_id]
+              properties:
+                recipe_id: { type: string, format: uuid }
+      responses:
+        '201': { description: Saved (or already present — same result, no duplicate). }
+        '400': { description: Missing/invalid X-Profile-ID or recipe_id. }
+        '404': { description: recipe_id does not exist. }
+    get:
+      summary: List the cook's favorites as recipe cards (wall applied).
+      parameters: [ { $ref: '#/components/parameters/ProfileId' } ]
+      responses:
+        '200':
+          description: >
+            Saved recipes that comply with the cook's current constraints, as cards. A previously saved
+            recipe that now violates a constraint is omitted (consistent with the wall on every path).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, title, category, key_ingredients]
+                  properties:
+                    id: { type: string, format: uuid }
+                    title: { type: string }
+                    category:
+                      type: string
+                      enum: [hot_drink, cold_drink, breakfast, lunch, dinner]
+                    key_ingredients:
+                      type: array
+                      items: { type: string }
+                    image_url: { type: string, nullable: true }
+        '400': { description: Missing/invalid X-Profile-ID. }
+  /favorites/{recipe_id}:
+    delete:
+      summary: Remove a recipe from favorites.
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+        - name: recipe_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed (or was not present — idempotent). }
+        '400': { description: Missing/invalid X-Profile-ID. }

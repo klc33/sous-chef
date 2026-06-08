@@ -1,0 +1,60 @@
+openapi: 3.1.0
+info:
+  title: SousChef — Cook Profile (diet, allergies, servings)
+  version: 0.2.0
+  description: >
+    The passwordless cook's constraints, set once and reused every session. Identity comes from the
+    X-Profile-ID header only; the owner is never read from the request body. These constraints drive the
+    safety wall on every recipe path.
+
+components:
+  parameters:
+    ProfileId:
+      name: X-Profile-ID
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+  schemas:
+    Profile:
+      type: object
+      required: [diet, allergies, default_servings]
+      properties:
+        diet:
+          type: string
+          enum: [none, vegetarian, vegan, pescatarian]
+        allergies:
+          type: array
+          items:
+            type: string
+            enum: [peanuts, tree_nuts, milk, eggs, wheat_gluten, soy, fish, shellfish, sesame]
+        default_servings:
+          type: integer
+          minimum: 1
+
+paths:
+  /profile:
+    get:
+      summary: Read the cook's current constraints (defaults if never set).
+      parameters: [ { $ref: '#/components/parameters/ProfileId' } ]
+      responses:
+        '200':
+          description: The profile (diet=none, no allergies, default_servings=2 if never set).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+        '400': { description: Missing/invalid X-Profile-ID. }
+    put:
+      summary: Set or update diet, allergies, and default servings (applies to subsequent results).
+      parameters: [ { $ref: '#/components/parameters/ProfileId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Profile' }
+      responses:
+        '200':
+          description: The saved profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+        '400': { description: Missing/invalid X-Profile-ID or body (unknown diet/allergen, servings < 1). }
