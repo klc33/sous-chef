@@ -34,20 +34,17 @@ def process_one(raw: dict[str, Any], off: OpenFoodFacts) -> dict[str, Any]:
     """Turn one normalized raw recipe into the fully-processed dict the loader stores.
 
     Runs the deterministic stages in order: pick a category, parse ingredients, tag allergens + derive
-    diet flags (mutating the ingredient dicts), then aggregate nutrition for the source servings. The
-    result merges the raw passthrough fields with everything computed here.
+    diet flags (mutating the ingredient dicts), then derive nutrition — authoritative source data
+    (Food.com) when present, else an Open Food Facts approximation. The result merges the raw passthrough
+    fields with everything computed here.
     """
     category = categorize.categorize(raw)
     ingredients = extract_ingredients.extract(raw.get("raw_ingredients", []))
     diet_allergen = allergens.analyze(ingredients, off)
     servings = raw.get("servings") or 1
-    # Only compute nutrition when there are ingredients to aggregate; otherwise leave it absent so the
-    # recipe is flagged incomplete (and never surfaced).
-    nutrition = (
-        nutrition_stage.aggregate(ingredients, off, basis_servings=servings)
-        if ingredients
-        else None
-    )
+    # Prefer the source's own per-serving nutrition (Food.com) over approximating from OFF; returns None
+    # when there is neither source data nor ingredients, leaving the recipe incomplete (never surfaced).
+    nutrition = nutrition_stage.compute(raw, ingredients, off, basis_servings=servings)
     return {
         "source": raw["source"],
         "source_id": raw["source_id"],

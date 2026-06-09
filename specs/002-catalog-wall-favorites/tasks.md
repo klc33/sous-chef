@@ -152,10 +152,10 @@ Single FastAPI monolith at repo root: `app/`, `alembic/`, `ingestion/`, `tests/`
 
 **Purpose**: The architectural safety regression and end-to-end validation across all stories.
 
-- [ ] T039 [P] Add the **"new output path forgets the guard" regression** to `tests/unit/test_constraint_guard.py`: a parametrized test over EVERY cook-facing recipe path (`GET /recipes`, `GET /recipes/{id}`, `GET /favorites`) feeding a nut-allergic profile and asserting **0** violating recipes — adding a path that skips `recipe_view` fails this test.
-- [ ] T040 [P] Run `make lint` (ruff + mypy) and fix; verify **every new function has an explanatory comment** (repo rule).
-- [ ] T041 Run the [quickstart.md](quickstart.md) scenarios A–C against `make up`, plus the corpus-sanity SQL (0 rows) and the SC-001 check (nut-allergic cook sees 0 nut recipes anywhere).
-- [ ] T042 [P] Update `docs/RUNBOOK.md` with the ingestion run + Kaggle-subset placement, and confirm `make test` runs the new unit + integration suites.
+- [X] T039 [P] Add the **"new output path forgets the guard" regression** to `tests/integration/test_wall_regression.py` (drives the real DB-backed HTTP endpoints, so it lives with the integration suite rather than the pure-unit `test_constraint_guard.py`): a parametrized test over EVERY cook-facing recipe path (`GET /recipes`, `GET /recipes/{id}`, `GET /favorites`) feeding a nut-allergic profile and asserting **0** violating recipes — adding a path that skips `recipe_view` fails this test.
+- [X] T040 [P] Run `make lint` (ruff + mypy) and fix; verify **every new function has an explanatory comment** (repo rule).
+- [X] T041 Run the [quickstart.md](quickstart.md) scenarios A–C against `make up`, plus the corpus-sanity SQL (0 rows) and the SC-001 check (nut-allergic cook sees 0 nut recipes anywhere).
+- [X] T042 [P] Update `docs/RUNBOOK.md` with the ingestion run + Kaggle-subset placement, and confirm `make test` runs the new unit + integration suites.
 
 ---
 

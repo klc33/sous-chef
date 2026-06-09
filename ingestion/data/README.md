@@ -19,6 +19,12 @@ Either dataset works; `fetch_kaggle.py` normalizes whichever columns are present
 raw-recipe shape (title, ingredients, steps). Keep the subset modest — the corpus target is roughly a
 few hundred to ~2,000 recipes total across all sources.
 
+**Nutrition**: if the **Food.com** `nutrition` column is present (a per-serving list
+`[calories, total fat PDV, sugar PDV, sodium PDV, protein PDV, saturated fat PDV, carbohydrates PDV]`),
+ingestion uses it directly as **authoritative** nutrition (`is_approximate = false`). Sources without a
+nutrition column (RecipeNLG, TheMealDB, TheCocktailDB) fall back to an Open Food Facts estimate, which is
+flagged `is_approximate = true`. So keep the `nutrition` column in your Food.com subset for exact macros.
+
 ## How to obtain it
 
 1. Download from Kaggle (account required):

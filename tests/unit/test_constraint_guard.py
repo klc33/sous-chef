@@ -4,7 +4,9 @@ These pin the deterministic predicate that decides whether a recipe may surface:
 fail-closed rule on uncertain allergen detection, each diet, the never-filtering `diet=none`, and that
 `filter` drops violators while keeping compliant recipes in order. Pure Python — no DB, no app.
 
-The "new output path forgets the guard" regression (T039) is added to this file in the Polish phase.
+This file pins the predicate in isolation. The companion "new output path forgets the guard" regression
+(T039) — which proves every wired cook-facing endpoint actually invokes the guard — lives in
+`tests/integration/test_wall_regression.py`, since it must drive the real DB-backed HTTP paths.
 """
 
 from __future__ import annotations

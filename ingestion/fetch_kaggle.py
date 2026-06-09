@@ -46,6 +46,43 @@ def _as_list(value: Any) -> list[str]:
     return [str(parsed).strip()]
 
 
+# Food.com ships a `nutrition` column: a 7-element list of per-serving values
+# [calories, total fat PDV, sugar PDV, sodium PDV, protein PDV, saturated fat PDV, carbohydrates PDV].
+# We pass the raw 7 values through (the nutrition stage converts PDV→grams); only a well-formed,
+# non-negative 7-tuple is accepted, so a corrupt/absent cell falls back to OFF aggregation.
+_FOODCOM_NUTRITION_LEN = 7
+
+
+def _parse_nutrition(value: Any) -> list[float] | None:
+    """Parse Food.com's stringified `nutrition` list into 7 non-negative floats, or None if unusable.
+
+    Accepts an actual list or a Python-list-literal string (the CSV form). Anything that is not exactly
+    seven parseable, non-negative numbers is rejected as None so the pipeline approximates from OFF
+    instead of storing a garbage authoritative row.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    raw: Any = value
+    if not isinstance(raw, (list, tuple)):
+        text = str(raw).strip()
+        if not text:
+            return None
+        try:
+            raw = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return None
+    if not isinstance(raw, (list, tuple)) or len(raw) != _FOODCOM_NUTRITION_LEN:
+        return None
+    try:
+        nums = [float(v) for v in raw]
+    except (TypeError, ValueError):
+        return None
+    # Calories and PDV percentages are never negative; a negative signals a corrupt cell.
+    if any(n < 0 for n in nums):
+        return None
+    return nums
+
+
 def _normalize(row: pd.Series, index: int) -> dict[str, Any]:
     """Flatten one CSV row into the common raw-recipe dict, tolerant of either dataset's columns."""
     # Title: RecipeNLG uses `title`, Food.com uses `name`.
@@ -69,6 +106,9 @@ def _normalize(row: pd.Series, index: int) -> dict[str, Any]:
         "total_time_minutes": int(minutes) if minutes is not None and not pd.isna(minutes) else None,
         "raw_ingredients": ingredients,
         "steps": steps,
+        # Authoritative per-serving nutrition when the source provides it (Food.com); None otherwise
+        # (e.g. RecipeNLG), in which case the nutrition stage approximates from Open Food Facts.
+        "food_com_nutrition": _parse_nutrition(row.get("nutrition")),
         "title_blob": " ".join([title, *steps]),
     }
 

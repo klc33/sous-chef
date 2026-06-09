@@ -52,6 +52,48 @@ Dev secrets live at KV v2 mount `secret`, path `sous-chef` (what `app/infra/vaul
 seeded values are **throwaway dev placeholders** — real provider keys are added in their own phases
 and never committed (golden rule #4).
 
+## Build the recipe corpus (`make ingest`)
+
+Offline, idempotent pipeline that populates the catalog (feature `002-catalog-wall-favorites`):
+fetch → categorize → extract ingredients → allergens + nutrition → load → coverage report. It runs
+against the configured Postgres (the same `POSTGRES_URL` the stack uses) and never ships in any image
+(no torch; the `ingestion` dependency group is offline-only).
+
+```bash
+uv sync --group ingestion      # one-time: installs pandas (offline group)
+make ingest                    # → uv run python -m ingestion.run_ingest
+```
+
+Sources:
+
+- **TheMealDB** (food) and **TheCocktailDB** (non-alcoholic drinks) — pulled live from their free APIs;
+  no key or local file needed.
+- **Kaggle subset** (volume) — *optional*. Place a CSV at **`ingestion/data/kaggle_recipes.csv`**
+  (gitignored; see [`ingestion/data/README.md`](../ingestion/data/README.md)). Either **RecipeNLG** or
+  **Food.com (RAW_recipes)** works — `fetch_kaggle.py` normalizes whichever columns are present. Take a
+  modest subset (~1,500 rows); the corpus target is a few hundred to ~2,000 recipes total. **No file? The
+  run still succeeds on the two APIs alone.**
+
+> **Nutrition accuracy:** when the **Food.com** `nutrition` column is present (a per-serving
+> `[calories, total-fat PDV, sugar PDV, sodium PDV, protein PDV, sat-fat PDV, carbs PDV]` list), ingestion
+> uses it as **authoritative** (`is_approximate = false`). Sources without it (RecipeNLG / TheMealDB /
+> TheCocktailDB) fall back to an Open Food Facts estimate flagged `is_approximate = true`. Keep that
+> column in your Food.com subset for exact macros.
+
+Re-running is safe — every recipe upserts on `(source, source_id)`, so the corpus converges without
+duplicates. The run ends with a coverage report (per-category counts, `% allergen_certain`, and the
+surfaceable count for a representative allergic profile).
+
+Corpus sanity — every surfaceable recipe is complete (SC-002), expect **0 rows**:
+
+```sql
+SELECT id FROM recipes
+WHERE is_complete = true
+  AND (category IS NULL
+       OR id NOT IN (SELECT recipe_id FROM ingredients)
+       OR id NOT IN (SELECT recipe_id FROM nutrition_cache));
+```
+
 ## View traces in Phoenix
 
 Each application request emits one redacted span (the tracing middleware in `app/main.py` →

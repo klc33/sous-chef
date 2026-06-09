@@ -1,10 +1,14 @@
-"""Aggregate Open Food Facts per-ingredient nutriments into a per-recipe nutrition row (at ingestion).
+"""Derive a per-recipe nutrition row at ingestion, preferring authoritative source data over estimates.
 
-For each ingredient we map quantity+unit to grams, pull the OFF per-100g nutriments (cached), scale, and
-sum across the recipe to get totals for the recipe's source servings (`basis_servings`). Whenever an
-ingredient lacks an OFF mapping OR a usable quantity, it is counted as unmapped and `is_approximate` is
-set True — partial coverage is signalled honestly, never fabricated (research §6). The runtime NEVER
-calls OFF; it only reads + scales this precomputed row.
+Two strategies, picked by `compute`:
+  * **Authoritative** — when the source ships its own nutrition (Food.com's per-serving `nutrition`
+    column), convert it directly. These totals are exact, so `is_approximate = false`.
+  * **Approximate** — otherwise, map each ingredient's quantity+unit to grams, pull OFF per-100g
+    nutriments (cached), scale, and sum across the recipe. Any ingredient lacking an OFF mapping or a
+    usable quantity is counted as unmapped and `is_approximate` is set True — partial coverage is
+    signalled honestly, never fabricated (research §6).
+
+The runtime NEVER calls OFF; it only reads + scales this precomputed row.
 """
 
 from __future__ import annotations
@@ -12,6 +16,65 @@ from __future__ import annotations
 from typing import Any
 
 from app.infra.external.openfoodfacts import OpenFoodFacts
+
+# --- Food.com authoritative nutrition --------------------------------------------------------------
+# Food.com's `nutrition` column is a 7-element list of PER-SERVING values, in this fixed order:
+# [calories (kcal), total fat (PDV), sugar (PDV), sodium (PDV), protein (PDV), saturated fat (PDV),
+#  carbohydrates (PDV)] — where PDV is "percentage of daily value". Only the indices we store are named.
+_FC_CALORIES = 0
+_FC_TOTAL_FAT_PDV = 1
+_FC_PROTEIN_PDV = 4
+_FC_CARBS_PDV = 6
+
+# FDA reference Daily Values (in grams) that Food.com's PDV percentages are taken against (the pre-2016
+# values the dataset was built on). Grams = PDV/100 * DV. Only fat/protein/carbs are needed here.
+_DV_TOTAL_FAT_G = 65.0
+_DV_PROTEIN_G = 50.0
+_DV_CARBS_G = 300.0
+
+
+def from_food_com(values: list[float]) -> dict[str, Any]:
+    """Convert a Food.com per-serving `nutrition` list into a nutrition_cache-shaped dict (exact).
+
+    Calories are already absolute kcal; the macro entries are percentages of a daily value, so each is
+    converted back to grams via its reference DV. Because the source states these per serving, the basis
+    is 1 serving and the totals are authoritative — `is_approximate` is False and nothing is unmapped.
+    The caller is responsible for having validated `values` (7 non-negative numbers).
+    """
+    return {
+        "basis_servings": 1,
+        "calories": round(float(values[_FC_CALORIES]), 2),
+        "protein_g": round(float(values[_FC_PROTEIN_PDV]) / 100.0 * _DV_PROTEIN_G, 2),
+        "carbs_g": round(float(values[_FC_CARBS_PDV]) / 100.0 * _DV_CARBS_G, 2),
+        "fat_g": round(float(values[_FC_TOTAL_FAT_PDV]) / 100.0 * _DV_TOTAL_FAT_G, 2),
+        "is_approximate": False,
+        "unmapped_ingredient_count": 0,
+    }
+
+
+def compute(
+    raw: dict[str, Any],
+    ingredients: list[dict[str, Any]],
+    off: OpenFoodFacts,
+    *,
+    basis_servings: int,
+) -> dict[str, Any] | None:
+    """Pick the best nutrition for a recipe: authoritative source data over OFF approximation.
+
+    Uses the recipe's own `food_com_nutrition` (per-serving, exact) when the fetch stage parsed one;
+    otherwise aggregates Open Food Facts per-ingredient nutriments (approximate) when there are
+    ingredients to sum. With neither source data nor ingredients there is nothing to compute, so returns
+    None and the recipe is left incomplete (and thus never surfaced).
+    """
+    food_com = raw.get("food_com_nutrition")
+    if food_com is not None:
+        return from_food_com(food_com)
+    if ingredients:
+        return aggregate(ingredients, off, basis_servings=basis_servings)
+    return None
+
+
+# --- Open Food Facts approximate aggregation -------------------------------------------------------
 
 # Unit → grams conversion. Volume units use an approximate ~1 g/ml density (good enough for an
 # "approximate" flag-bearing estimate). Count-like units (clove/slice/piece) have no reliable mass and
