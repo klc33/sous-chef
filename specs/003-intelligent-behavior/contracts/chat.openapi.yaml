@@ -1,0 +1,140 @@
+openapi: 3.1.0
+info:
+  title: SousChef — Chat (Intelligent Turn) API
+  version: 0.3.0
+  description: >
+    The single conversational turn endpoint added in 003-intelligent-behavior. A cook sends free text;
+    the turn flows guardrails-in → classifier router → workflow|bounded-agent → constraint guard (the
+    wall) → guardrails-out. Every recipe returned is a real, wall-cleared corpus recipe. Cook identity is
+    the passwordless X-Profile-ID header (never a body field). Recipe/favorite/profile endpoints are
+    defined by 002-catalog-wall-favorites and unchanged here.
+servers:
+  - url: /
+paths:
+  /chat:
+    post:
+      operationId: chatTurn
+      summary: Process one conversational turn (search, plan, substitute, nutrition, chitchat).
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatRequest' }
+      responses:
+        '200':
+          description: >
+            Turn handled. May be a normal answer or a safe refusal (refused=true) for
+            injection/jailbreak/allergen-override attempts — both are 200 with a safe reply.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatResponse' }
+        '400': { description: Malformed request (e.g., empty message). }
+        '403': { description: Missing/invalid X-Profile-ID. }
+        '429': { description: Rate limit exceeded for this profile. }
+components:
+  parameters:
+    ProfileId:
+      name: X-Profile-ID
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+      description: Passwordless cook identity. Scopes constraints, favorites, and seen-history.
+  schemas:
+    ChatRequest:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message: { type: string, minLength: 1, description: The cook's free-text request. }
+        category:
+          type: string
+          nullable: true
+          enum: [hot drink, cold drink, breakfast, lunch, dinner, null]
+          description: Optional explicit category intent; otherwise inferred from the message.
+    ChatResponse:
+      type: object
+      additionalProperties: false
+      required: [reply, recipes, intent, refused]
+      properties:
+        reply: { type: string, description: Natural-language reply (grounded; never invents recipes/steps). }
+        intent:
+          type: string
+          enum: [find_recipe, plan_meals, nutrition_q, substitution, chitchat, out_of_scope]
+        refused:
+          type: boolean
+          description: True when the input/output rail refused the turn (no unsafe content emitted).
+        recipes:
+          type: array
+          description: Up to 3 ranked, wall-cleared recipe cards for find_recipe turns.
+          maxItems: 3
+          items: { $ref: '#/components/schemas/RecipeCard' }
+        meal_plan:
+          oneOf:
+            - { $ref: '#/components/schemas/MealPlan' }
+            - { type: 'null' }
+        shopping_list:
+          oneOf:
+            - { $ref: '#/components/schemas/ShoppingList' }
+            - { type: 'null' }
+        substitution:
+          oneOf:
+            - { $ref: '#/components/schemas/SubstitutionResult' }
+            - { type: 'null' }
+    RecipeCard:
+      type: object
+      description: Defined by 002; a real stored recipe. Title + key ingredients + id for detail lookup.
+      required: [id, title, key_ingredients, category]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { type: string, enum: [hot drink, cold drink, breakfast, lunch, dinner] }
+        cuisine: { type: string, nullable: true }
+        key_ingredients: { type: array, items: { type: string }, maxItems: 4 }
+    MealPlan:
+      type: object
+      required: [days, distinct_cuisines]
+      properties:
+        days:
+          type: array
+          items:
+            type: object
+            required: [day, recipe]
+            properties:
+              day: { type: integer, minimum: 1 }
+              recipe: { $ref: '#/components/schemas/RecipeCard' }
+        distinct_cuisines:
+          type: integer
+          description: Count of distinct KNOWN cuisines (>=3 when corpus allows; "unknown" never counts).
+        shortfall_note:
+          type: string
+          nullable: true
+          description: Set when the requested length or >=3 distinct cuisines could not be met.
+    ShoppingList:
+      type: object
+      description: Exactly one consolidated, deduplicated, serving-scaled list for the whole plan.
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          items:
+            type: object
+            required: [ingredient, from_recipes]
+            properties:
+              ingredient: { type: string }
+              quantity: { type: number, nullable: true }
+              unit: { type: string, nullable: true }
+              from_recipes: { type: array, items: { type: string } }
+    SubstitutionResult:
+      type: object
+      required: [ingredient, substitutes, none_safe]
+      properties:
+        ingredient: { type: string }
+        substitutes:
+          type: array
+          description: Curated, allergen-safe replacements (never invented). Empty when none_safe=true.
+          items: { type: string }
+        none_safe:
+          type: boolean
+          description: True when no curated substitute is safe for the cook's declared allergens.

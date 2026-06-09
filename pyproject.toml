@@ -30,15 +30,35 @@ backend = [
   "arize-phoenix-otel",              # exporter to the Phoenix service (NOT the Phoenix server)
   "presidio-analyzer",               # PII detection (wired in a later phase)
   "presidio-anonymizer",             # PII redaction (wired in a later phase)
+  # ── 003-intelligent-behavior: serving deps for the turn pipeline (no torch) ──
+  "groq>=1.4.0",                     # LLM chat + native tool calling (Groq is chat-only)
+  "openai>=2.41.0",                  # OpenAI-compatible embeddings client (separate hosted provider)
+  "scikit-learn>=1.9.0",             # serve the offline-trained intent classifier
+  "joblib>=1.5.3",                   # load model.joblib (classifier artifact)
+  "slowapi>=0.1.9",                  # per-profile rate limiting on /chat
+  "nemoguardrails>=0.11.0",          # input/output guardrails (onnxruntime-backed — pulls no torch)
 ]
 
 [dependency-groups]
 # These NEVER ship in a serving image — local/CI/job only.
 dev  = ["ruff", "mypy"]
+# CI eval gates (classifier macro-F1, RAG hit@k, red-team refusal). Never shipped.
+evals = [
+    "pandas>=3.0.3",
+    "pytest>=9.0.3",
+    "scikit-learn>=1.9.0",
+]
 # Offline corpus pipeline only (TheMealDB/TheCocktailDB/Kaggle → categorize → embed). Never shipped.
 # httpx for the source/OFF calls comes from the shared base; pandas subsets the Kaggle CSV.
 ingestion = [
+    "openai>=2.41.0",
     "pandas>=3.0.3",
+]
+# Offline intent-classifier training (TF-IDF + logistic regression → model.joblib). Never shipped.
+ml = [
+    "joblib>=1.5.3",
+    "pandas>=3.0.3",
+    "scikit-learn>=1.9.0",
 ]
 test = ["pytest", "pytest-asyncio", "httpx"]
 
