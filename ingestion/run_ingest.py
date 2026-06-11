@@ -19,6 +19,7 @@ from ingestion import (
     allergens,
     categorize,
     coverage,
+    embed_recipes,
     extract_ingredients,
     fetch_kaggle,
     fetch_thecocktaildb,
@@ -96,8 +97,13 @@ def run() -> None:
                         error=str(exc),
                     )
             session.commit()
+            # Embed stage: give every complete recipe a vector for semantic search. Runs after load (so
+            # all rows exist) and before the coverage report. Idempotent — only null-embedding rows are
+            # processed, so a re-run is a cheap no-op.
+            embedded = embed_recipes.embed_pending(session)
+            session.commit()
             report = coverage.compute(session)
-            log.info("ingest.done", loaded=loaded, skipped=skipped)
+            log.info("ingest.done", loaded=loaded, skipped=skipped, embedded=embedded)
             print(coverage.format_report(report))
         finally:
             session.close()

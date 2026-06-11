@@ -36,7 +36,11 @@ backend = [
   "scikit-learn>=1.9.0",             # serve the offline-trained intent classifier
   "joblib>=1.5.3",                   # load model.joblib (classifier artifact)
   "slowapi>=0.1.9",                  # per-profile rate limiting on /chat
-  "nemoguardrails>=0.11.0",          # input/output guardrails (onnxruntime-backed — pulls no torch)
+  # NOTE: the input/output guardrails are implemented as DETERMINISTIC regex rails
+  # (app/guardrails/*.py) — deliberately, so the red-team gate is provable/reproducible (research §11).
+  # NeMo Guardrails was dropped from the serving image: it is unused in app/ and pulled a C++ build
+  # dependency (annoy) that broke the lean slim image (golden rule #3). Re-add behind a builder stage
+  # only if a model-backed rail is ever actually imported.
 ]
 
 [dependency-groups]

@@ -1,0 +1,49 @@
+text,label
+can you find me a cozy ramen for dinner,find_recipe
+I'd like a vegetarian breakfast bowl,find_recipe
+show me a spicy shrimp dish,find_recipe
+what can I make with sweet potatoes,find_recipe
+recommend a light Mediterranean lunch,find_recipe
+I'm in the mood for Vietnamese food,find_recipe
+find a dairy free dessert,find_recipe
+something hearty for a cold night,find_recipe
+plan four dinners for this week,plan_meals
+build a weekly menu with a grocery list,plan_meals
+organize my dinners across different cuisines,plan_meals
+I need a 6 day meal plan,plan_meals
+put together three varied dinners,plan_meals
+make a plan for the week with one shopping list,plan_meals
+schedule my meals for the next five days,plan_meals
+help me plan a week of vegan dinners,plan_meals
+how many calories in this chicken bowl,nutrition_q
+what's the protein content of this dish,nutrition_q
+tell me the macros for a serving,nutrition_q
+is this meal high in fat,nutrition_q
+how many carbs in this noodle dish,nutrition_q
+nutrition breakdown for two portions,nutrition_q
+what's the calorie count here,nutrition_q
+how much protein per serving,nutrition_q
+what can I use instead of cream,substitution
+substitute for eggs in this cake,substitution
+what's a replacement for soy sauce,substitution
+I have no butter what works instead,substitution
+dairy free swap for yogurt,substitution
+what can replace all purpose flour,substitution
+alternative to honey,substitution
+what do I use in place of basil,substitution
+hey there how are you,chitchat
+thanks a lot for your help,chitchat
+good afternoon,chitchat
+that sounds delicious thanks,chitchat
+what are you able to do,chitchat
+you've been great,chitchat
+see you next time,chitchat
+appreciate it,chitchat
+what's the weather like tomorrow,out_of_scope
+who won the world cup,out_of_scope
+help me write a cover letter,out_of_scope
+what's the capital of Japan,out_of_scope
+how do I set up a router,out_of_scope
+recommend a documentary to watch,out_of_scope
+what's the exchange rate for euros,out_of_scope
+explain how vaccines work,out_of_scope

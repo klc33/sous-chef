@@ -124,8 +124,9 @@ These invariants are absolute and override convenience, performance, or feature 
 
 The approved stack is the lean set required by the principles above: FastAPI + Pydantic; PostgreSQL
 with pgvector; Redis; HashiCorp Vault; Groq (chat-only LLM) with embeddings from a separate hosted
-provider; scikit-learn + joblib for the classifier; guardrails (NeMo Guardrails / Guardrails.ai) +
-Presidio for PII; Arize Phoenix (self-hosted, OpenTelemetry) for tracing; React + plain JavaScript/JSX
+provider; scikit-learn + joblib for the classifier; deterministic in-process guardrails (regex
+input/output rails — no framework dependency) + Presidio for PII; Arize Phoenix (self-hosted,
+OpenTelemetry) for tracing; React + plain JavaScript/JSX
 (no TypeScript) for the widget; Streamlit + streamlit-authenticator for the dashboard; Docker /
 docker-compose; Railway for deployment; SpecKit for the lifecycle. Python dependencies are managed
 with `uv` only (never `pip`), grouped so each image stays lean, and no image contains `torch`.

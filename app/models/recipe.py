@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -30,6 +31,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.config import get_settings
 from app.models.base import Base
 
 
@@ -120,6 +122,14 @@ class Recipe(Base):
     is_pescatarian: Mapped[bool] = mapped_column(nullable=False, default=False)
     # True only when category + ≥1 ingredient + allergens + nutrition are all present (surfacing gate).
     is_complete: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # Semantic embedding of the recipe (title + cuisine + category + key ingredients), written offline by
+    # ingestion (infra.embeddings). Nullable: a recipe with no embedding is simply skipped by vector
+    # search (`embedding IS NOT NULL`). The width is pinned to the migration's vector(1536) and asserted
+    # against config at startup, so a model/dim change must go through a new migration, never a silent
+    # mismatch. Cosine distance (`<=>`) ranks candidates; the HNSW index in 0003 backs the order-by.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(get_settings().embeddings_dim), nullable=True
+    )
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

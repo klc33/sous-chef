@@ -27,7 +27,12 @@ htmlcov/
 # Other surfaces / offline-only trees the backend image doesn't need
 widget/
 dashboard/
-ml/
+# Keep ml/ out of the image EXCEPT the trained classifier artifact the backend serves at runtime.
+# (ml/* excludes contents but not the dir, so the served model.joblib can be re-included below.)
+ml/*
+!ml/artifacts
+ml/artifacts/*
+!ml/artifacts/model.joblib
 ingestion/
 evals/
 docs/

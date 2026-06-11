@@ -24,6 +24,11 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
+# Prompts are code (read at runtime by rag/agent/router) and the trained classifier artifact is served
+# by app/classifier/predict.py — both are needed for the intelligent paths, so bundle them in the image.
+# (model.joblib is the `make train` output; build the image after training so the served SHA is pinned.)
+COPY prompts ./prompts
+COPY ml/artifacts/model.joblib ./ml/artifacts/model.joblib
 RUN uv sync --frozen --no-dev --extra backend
 
 ENV PATH="/srv/.venv/bin:$PATH"

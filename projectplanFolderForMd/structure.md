@@ -131,7 +131,7 @@ sous-chef/                          # repo root (the monolith + its sibling surf
 │   │   ├── __init__.py
 │   │   ├── input_rails.py          # screen prompt-injection / jailbreak / off-topic BEFORE routing
 │   │   ├── output_rails.py         # final leak check + trigger redaction BEFORE the reply leaves
-│   │   └── config/                 # NeMo Guardrails (or Guardrails.ai) rail definitions
+│   │   └── decision.py             # GuardrailDecision (deterministic regex rails — no NeMo framework)
 │   │
 │   ├── repo/                       # ---- ALL database access (parameterized; SQL-injection safe) ----
 │   │   ├── __init__.py

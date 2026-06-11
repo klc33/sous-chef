@@ -39,8 +39,9 @@ joblib — **no torch in any image**.
 **Primary Dependencies**: All already present (no `uv add` expected):
 - Runtime (`backend` extra): `groq` (LLM chat + tool calling), `openai` (embeddings via the separate
   hosted provider — Groq is chat-only), `pgvector` (vector column + search), `scikit-learn` + `joblib`
-  (serve the classifier), `nemoguardrails` (rails) / Presidio (already wired for redaction), `slowapi`
-  (rate limit), SQLAlchemy/Alembic/`psycopg`.
+  (serve the classifier), deterministic in-process guardrails (regex rails in `app/guardrails/` — no
+  framework; `nemoguardrails` was dropped as unused + a heavy C++ build dep), Presidio (already wired for
+  redaction), `slowapi` (rate limit), SQLAlchemy/Alembic/`psycopg`.
 - Offline `ingestion` group: `openai` (embed recipes), `httpx`. Offline `ml` group: `scikit-learn`,
   `joblib`, `pandas`. `evals` group: `scikit-learn`, `pandas`, `pytest` (+ `ragas` available if needed).
 

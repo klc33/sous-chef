@@ -53,9 +53,14 @@ def engine() -> Iterator[Engine]:
 
     @event.listens_for(eng, "connect")
     def _pin_search_path(dbapi_conn: object, _record: object) -> None:
-        """Pin each new connection to the test schema only, hiding the real public corpus."""
+        """Pin each connection to the test schema, with public as a fallback for the pgvector type.
+
+        Tables resolve test-schema-first (create_all built them there, shadowing the real public corpus),
+        so no corpus leaks; `public` trails only so the `vector` type — installed there by the pgvector
+        extension — resolves when the recipes table's embedding column is created/queried.
+        """
         cur = dbapi_conn.cursor()  # type: ignore[attr-defined]
-        cur.execute(f"SET search_path TO {_TEST_SCHEMA}")
+        cur.execute(f"SET search_path TO {_TEST_SCHEMA}, public")
         cur.close()
 
     try:
@@ -63,12 +68,18 @@ def engine() -> Iterator[Engine]:
     except Exception:  # noqa: BLE001 — any connection failure means "no test DB", so skip.
         eng.dispose()
         pytest.skip("No test Postgres reachable (set TEST_DATABASE_URL to run integration tests).")
-    # CREATE SCHEMA works regardless of the (not-yet-existing) search_path target.
+    # Ensure pgvector is available (migration 0001 does this in prod; create_all-based tests need it too),
+    # then make the throwaway schema. Both are idempotent.
+    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {_TEST_SCHEMA}"))
     conn.commit()
     conn.close()
 
-    Base.metadata.create_all(eng)
+    # checkfirst=False forces CREATE in the (empty) test schema: with `public` on the search_path for the
+    # pgvector type, create_all's default existence check would otherwise see public.recipes and skip,
+    # leaving inserts to fall through to the un-migrated public table. The throwaway schema is fresh, so
+    # unconditional creates are safe.
+    Base.metadata.create_all(eng, checkfirst=False)
     yield eng
     with eng.connect() as cleanup:
         cleanup.execute(text(f"DROP SCHEMA IF EXISTS {_TEST_SCHEMA} CASCADE"))

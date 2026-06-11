@@ -50,7 +50,8 @@ backend = [
   "hvac",                     # Vault secrets adapter
   "groq",                     # LLM (generation + agent)
   "openai",                   # embeddings via a separate provider (Groq is chat-only)
-  "nemoguardrails",           # input/output rails (or "guardrails-ai")
+  # NOTE: guardrails are deterministic regex rails in app/guardrails/ — no framework dep.
+  # nemoguardrails was dropped (unused in app/ + pulled a C++ build dep that bloated the image).
   "presidio-analyzer",        # PII detection
   "presidio-anonymizer",      # PII redaction
   "scikit-learn",             # SERVE the trained classifier (no torch)

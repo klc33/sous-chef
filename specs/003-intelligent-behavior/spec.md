@@ -225,6 +225,17 @@ system to emit a constraint-violating recipe or to abandon its instructions.
   retrieval + planning + list-building) MUST be handled by the bounded tool-calling agent.
 - **FR-004**: Misrouting MUST never produce an unsafe result — every routed path remains subject to the
   wall, grounding, and guardrails.
+- **FR-004a**: A message carrying **no recognizable signal** — the router matches none of the known
+  intent vocabulary, so its prediction is merely the model's prior — MUST be answered with a cheap, safe
+  clarification reply ("I didn't catch that — what would you like to cook?") on the deterministic path and
+  MUST NOT escalate to the bounded agent. Rationale: a zero-signal turn gives the agent nothing to act on,
+  so spending an (expensive) agent invocation on it is pure waste; a re-prompt is cheaper and just as
+  helpful. Note this is *not* reliable spam detection — a one-word request for an out-of-vocabulary dish
+  (e.g. "sushi") also carries no signal and is indistinguishable from gibberish to the classifier; both
+  correctly receive the same harmless clarification re-prompt rather than an agent call. This is distinct
+  from a genuine-but-ambiguous request (low confidence yet with *real* matched signal), which still
+  escalates to the agent as the safe, more-capable path. Growing the intent dataset to cover common dishes
+  shrinks the set of legitimate inputs that fall into the zero-signal bucket.
 
 **Retrieval & grounding**
 

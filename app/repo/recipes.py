@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.recipe import Ingredient, NutritionCache, Recipe
+from app.models.recipe import Diet, Ingredient, NutritionCache, Recipe
 
 
 def upsert_recipe(
@@ -110,6 +110,81 @@ def list_by_category(session: Session, category: str) -> list[Recipe]:
         .where(Recipe.category == category, Recipe.is_complete.is_(True))
         .options(selectinload(Recipe.ingredients))
         .order_by(Recipe.title)
+    ).scalars()
+    return list(rows)
+
+
+def search_by_vector(
+    session: Session,
+    query_vec: list[float],
+    *,
+    category: str | None = None,
+    diet: Diet = Diet.NONE,
+    exclude_ids: list[uuid.UUID] | None = None,
+    pool: int = 20,
+) -> list[Recipe]:
+    """Return the nearest complete, embedded recipes to `query_vec` as an OVER-FETCHED candidate pool.
+
+    One parameterized cosine-distance query (`embedding <=> :query_vec`) with the cheap, exact predicates
+    pushed into SQL: only complete + embedded rows, optionally one category, the cook's diet flag, and the
+    seen-history exclusion. It deliberately returns up to `pool` rows (the `retrieval_candidate_pool`
+    over-fetch, ~20) — NOT the final 3 — because the allergen wall (`constraint_guard`) trims afterward in
+    the service layer; a hard `LIMIT 3` here could under-return when compliant recipes sit deeper in the
+    ranking. Diet maps to the precomputed `is_vegetarian/is_vegan/is_pescatarian` flags (`Diet.NONE` never
+    filters). Children are eager-loaded so the wall + recipe_view need no extra round-trips. ORM /
+    parameterized only — `query_vec` and `exclude_ids` bind as parameters (injection-safe).
+    """
+    stmt = (
+        select(Recipe)
+        .where(Recipe.is_complete.is_(True), Recipe.embedding.isnot(None))
+        .options(selectinload(Recipe.ingredients), selectinload(Recipe.nutrition))
+        .order_by(Recipe.embedding.cosine_distance(query_vec))
+        .limit(pool)
+    )
+
+    # Optional exact category pre-filter (the five fixed categories are a metadata filter, not a guess).
+    if category is not None:
+        stmt = stmt.where(Recipe.category == category)
+
+    # Diet pre-filter: a stricter diet requires the matching precomputed flag; `none` adds no predicate.
+    if diet == Diet.VEGAN:
+        stmt = stmt.where(Recipe.is_vegan.is_(True))
+    elif diet == Diet.VEGETARIAN:
+        stmt = stmt.where(Recipe.is_vegetarian.is_(True))
+    elif diet == Diet.PESCATARIAN:
+        stmt = stmt.where(Recipe.is_pescatarian.is_(True))
+
+    # Freshness: drop already-shown recipes for this cook (favorites are never added to that set).
+    if exclude_ids:
+        stmt = stmt.where(Recipe.id.notin_(exclude_ids))
+
+    return list(session.execute(stmt).scalars())
+
+
+def set_embedding(session: Session, recipe_id: uuid.UUID, embedding: list[float]) -> None:
+    """Write one recipe's embedding vector (the offline ingestion embed-stage write).
+
+    Kept in the repo so the embed stage never touches a session directly (DB access stays one layer).
+    Flushes in the caller's transaction; a missing id is a no-op the caller already guards against.
+    """
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is not None:
+        recipe.embedding = embedding
+        session.flush()
+
+
+def iter_embeddable(session: Session) -> list[Recipe]:
+    """Return complete recipes that still need an embedding (null `embedding`), ingredients eager-loaded.
+
+    The candidate set for the idempotent embed stage: re-running ingestion only embeds rows that lack a
+    vector, so a rebuild converges without re-embedding the whole corpus. Ingredients are loaded because
+    the embed text includes the first few ingredient names.
+    """
+    rows = session.execute(
+        select(Recipe)
+        .where(Recipe.is_complete.is_(True), Recipe.embedding.is_(None))
+        .options(selectinload(Recipe.ingredients))
+        .order_by(Recipe.ingested_at)
     ).scalars()
     return list(rows)
 

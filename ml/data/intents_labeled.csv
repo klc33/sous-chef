@@ -1,0 +1,255 @@
+text,label
+something Thai for dinner,find_recipe
+show me a quick pasta recipe,find_recipe
+I want a vegan breakfast idea,find_recipe
+find me a spicy chicken dish,find_recipe
+what can I make with chickpeas,find_recipe
+got any cozy soup recipes,find_recipe
+recommend a light lunch,find_recipe
+I feel like eating Mexican tonight,find_recipe
+show me some dinner options,find_recipe
+an easy dessert please,find_recipe
+suggest a healthy smoothie,find_recipe
+find a recipe with salmon,find_recipe
+what should I cook tonight,find_recipe
+I need a gluten free dinner,find_recipe
+any good curry recipes,find_recipe
+give me a breakfast with eggs,find_recipe
+something warm to drink,find_recipe
+a refreshing cold drink for summer,find_recipe
+show me Italian dinner ideas,find_recipe
+I want to try Korean food,find_recipe
+quick weeknight meals,find_recipe
+find me a vegetarian lunch,find_recipe
+a hearty stew recipe,find_recipe
+what can I bake with bananas,find_recipe
+show me a low carb dinner,find_recipe
+I'm craving tacos,find_recipe
+find a comforting pasta bake,find_recipe
+recipe for a fancy date night dinner,find_recipe
+something with tofu,find_recipe
+a simple salad idea,find_recipe
+show me grilled chicken recipes,find_recipe
+I want a high protein breakfast,find_recipe
+find me a Japanese noodle dish,find_recipe
+what's a good recipe for lentils,find_recipe
+give me a hot chocolate recipe,find_recipe
+show me something Mediterranean,find_recipe
+a kid friendly dinner please,find_recipe
+find a recipe using leftover rice,find_recipe
+I want a French dessert,find_recipe
+recommend a vegan dinner,find_recipe
+something easy for brunch,find_recipe
+find me a seafood pasta,find_recipe
+a warming winter soup,find_recipe
+show me Indian vegetarian dishes,find_recipe
+what can I cook with mushrooms,find_recipe
+I'd love a chocolate cake recipe,find_recipe
+find a spicy noodle bowl,find_recipe
+give me a light summer lunch,find_recipe
+show me a recipe for pancakes,find_recipe
+I want something with avocado,find_recipe
+find a cocktail for a party,find_recipe
+a simple weeknight stir fry,find_recipe
+recommend a Greek dinner,find_recipe
+show me a roasted vegetable dish,find_recipe
+plan three days of dinners,plan_meals
+build me a weekly meal plan,plan_meals
+plan my meals for the week,plan_meals
+I need a 5 day dinner plan,plan_meals
+make me a meal plan with a shopping list,plan_meals
+plan dinners for the next four nights,plan_meals
+can you plan a week of vegetarian meals,plan_meals
+organize my meals for the weekend,plan_meals
+create a 7 day meal plan,plan_meals
+plan dinner for monday through friday,plan_meals
+I want a varied dinner plan for the week,plan_meals
+put together a few days of meals,plan_meals
+plan three different dinners and a grocery list,plan_meals
+help me plan meals for the family,plan_meals
+make a two week dinner schedule,plan_meals
+plan a week of healthy lunches,plan_meals
+give me a meal plan with different cuisines,plan_meals
+plan dinners and tell me what to buy,plan_meals
+set up a meal plan for five days,plan_meals
+I need meals planned for the whole week,plan_meals
+build a dinner plan with a consolidated shopping list,plan_meals
+plan some vegan dinners for the week,plan_meals
+can you make me a weekly dinner menu,plan_meals
+plan out my dinners with variety,plan_meals
+schedule three nights of dinner,plan_meals
+make a meal plan and shopping list for me,plan_meals
+plan a week of meals across different cuisines,plan_meals
+I'd like a four day meal plan,plan_meals
+organize a week of dinners for me,plan_meals
+create a dinner plan plus groceries,plan_meals
+plan my dinners so they're all different,plan_meals
+help me plan a balanced week of meals,plan_meals
+build a 3 day plan with a grocery list,plan_meals
+plan meals for me this week please,plan_meals
+put together a weekly dinner rotation,plan_meals
+plan dinners with one shopping list,plan_meals
+make me a varied multi day meal plan,plan_meals
+plan a week of dinners no repeats,plan_meals
+draft a meal plan for the next few days,plan_meals
+plan dinners for a week and list ingredients,plan_meals
+how many calories are in lasagna,nutrition_q
+what's the protein in this recipe,nutrition_q
+how much fat does this dish have,nutrition_q
+calorie count for a serving of pad thai,nutrition_q
+is this recipe high in carbs,nutrition_q
+what are the macros for this meal,nutrition_q
+how many calories per serving,nutrition_q
+tell me the nutrition for chicken curry,nutrition_q
+how much sugar is in this,nutrition_q
+what's the calorie content of a burrito,nutrition_q
+how many grams of protein in this dish,nutrition_q
+nutritional info for spaghetti bolognese,nutrition_q
+how many calories if I eat the whole thing,nutrition_q
+what's the fat content here,nutrition_q
+is this a low calorie meal,nutrition_q
+how many carbs in a bowl of ramen,nutrition_q
+give me the nutrition breakdown,nutrition_q
+how much protein does salmon have,nutrition_q
+what's the calorie count for two servings,nutrition_q
+how nutritious is this recipe,nutrition_q
+how many calories in a slice of pizza,nutrition_q
+tell me the macros per serving,nutrition_q
+what's the protein content of lentil soup,nutrition_q
+how many calories does this smoothie have,nutrition_q
+is this meal good for weight loss,nutrition_q
+how much fat in a tablespoon of olive oil,nutrition_q
+what's the nutrition for a vegan burger,nutrition_q
+how many calories in scrambled eggs,nutrition_q
+calories for one portion please,nutrition_q
+how carb heavy is this pasta,nutrition_q
+what are the calories scaled to four servings,nutrition_q
+how much protein per plate,nutrition_q
+nutrition facts for this dish,nutrition_q
+how many calories total,nutrition_q
+what's the calorie estimate for this recipe,nutrition_q
+how many calories in a cup of rice,nutrition_q
+tell me how much fat and protein this has,nutrition_q
+what's the energy content of this meal,nutrition_q
+is this dinner high in protein,nutrition_q
+how many calories per slice,nutrition_q
+what can I use instead of butter,substitution
+substitute for eggs in baking,substitution
+what's a good replacement for milk,substitution
+I'm out of flour what can I use,substitution
+swap for heavy cream,substitution
+what can replace soy sauce,substitution
+alternative to peanut butter,substitution
+what do I use instead of breadcrumbs,substitution
+substitute for buttermilk,substitution
+replacement for sour cream,substitution
+what can I use in place of sugar,substitution
+I have no baking powder what works instead,substitution
+dairy free substitute for cheese,substitution
+what's a substitute for cornstarch,substitution
+can I replace honey with something,substitution
+what to use instead of vegetable oil,substitution
+substitute for white wine in cooking,substitution
+egg free alternative for this recipe,substitution
+what can I swap for ricotta,substitution
+replacement for fresh herbs,substitution
+what can I use instead of nuts,substitution
+gluten free substitute for pasta,substitution
+what replaces yogurt in a recipe,substitution
+substitute for lemon juice,substitution
+I don't have garlic what else works,substitution
+what can stand in for coconut milk,substitution
+alternative to brown sugar,substitution
+what's a good vegan butter substitute,substitution
+replace mayonnaise with what,substitution
+what can I use instead of wheat flour,substitution
+substitute for chicken broth,substitution
+what to use in place of parmesan,substitution
+swap for fish sauce,substitution
+what can replace cream cheese,substitution
+substitute for shallots,substitution
+I'm allergic to dairy what milk alternative,substitution
+what works instead of pine nuts,substitution
+replacement for tomato paste,substitution
+what can I use besides olive oil,substitution
+substitute for vanilla extract,substitution
+hello there,chitchat
+hi how are you,chitchat
+good morning,chitchat
+thanks so much,chitchat
+that sounds great,chitchat
+you're really helpful,chitchat
+hey,chitchat
+thank you,chitchat
+what's up,chitchat
+nice to meet you,chitchat
+how's it going,chitchat
+appreciate the help,chitchat
+have a good day,chitchat
+that was perfect thanks,chitchat
+cool,chitchat
+awesome thank you,chitchat
+good evening,chitchat
+sounds good,chitchat
+who are you,chitchat
+what can you do,chitchat
+tell me about yourself,chitchat
+you're the best,chitchat
+ok great,chitchat
+thanks for the recipe,chitchat
+goodbye,chitchat
+see you later,chitchat
+how are you today,chitchat
+yo,chitchat
+much appreciated,chitchat
+that helps a lot,chitchat
+lovely,chitchat
+no worries thanks,chitchat
+hi again,chitchat
+greetings,chitchat
+thanks chef,chitchat
+amazing thank you,chitchat
+have a great evening,chitchat
+you rock,chitchat
+that's wonderful,chitchat
+okay thanks,chitchat
+what's the weather today,out_of_scope
+who won the football game,out_of_scope
+tell me a joke,out_of_scope
+what's the capital of France,out_of_scope
+how do I fix my car,out_of_scope
+write me a poem about love,out_of_scope
+what time is it in Tokyo,out_of_scope
+help me with my taxes,out_of_scope
+who is the president,out_of_scope
+translate this to Spanish,out_of_scope
+what's the stock price of Apple,out_of_scope
+how do I invest in crypto,out_of_scope
+what's the meaning of life,out_of_scope
+give me directions to the airport,out_of_scope
+how do I lose weight fast,out_of_scope
+what movie should I watch,out_of_scope
+explain quantum physics,out_of_scope
+book me a flight to Paris,out_of_scope
+what's the latest news,out_of_scope
+how tall is Mount Everest,out_of_scope
+write code for a website,out_of_scope
+what's a good workout routine,out_of_scope
+who painted the Mona Lisa,out_of_scope
+help me write an email to my boss,out_of_scope
+what's the square root of 144,out_of_scope
+recommend a good book to read,out_of_scope
+how do I train my dog,out_of_scope
+what's the population of India,out_of_scope
+tell me about the solar system,out_of_scope
+how do I knit a scarf,out_of_scope
+what's a good vacation spot,out_of_scope
+help me plan a wedding,out_of_scope
+how does the internet work,out_of_scope
+what language is spoken in Brazil,out_of_scope
+give me relationship advice,out_of_scope
+how do I change a tire,out_of_scope
+what's trending on social media,out_of_scope
+explain the rules of chess,out_of_scope
+who wrote Romeo and Juliet,out_of_scope
+what's the best phone to buy,out_of_scope

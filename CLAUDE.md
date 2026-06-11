@@ -25,7 +25,8 @@ Full design: [amer_idea-1.md](projectplanFolderForMd/amer_idea-1.md) · stack:
 
 ## Stack
 FastAPI · PostgreSQL + pgvector · Redis · HashiCorp Vault · **Groq** (LLM; embeddings from a *separate*
-provider — Groq is chat-only) · scikit-learn + joblib (classifier) · NeMo Guardrails / Guardrails.ai ·
+provider — Groq is chat-only) · scikit-learn + joblib (classifier) · deterministic in-process guardrails
+(regex input/output rails — NeMo Guardrails was evaluated and dropped: unused + heavy C++ build dep) ·
 Presidio (PII) · **Arize Phoenix** (self-hosted tracing, OpenTelemetry) · React + Vite (**plain JS/JSX,
 no TypeScript**) · Streamlit + streamlit-authenticator (cookie login) · Docker/compose · Railway · SpecKit.
 

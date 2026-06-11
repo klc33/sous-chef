@@ -1,0 +1,42 @@
+# Agent tool-selection eval (US3 / SC-005) — does the bounded agent reach for the RIGHT tools?
+#
+# Each case is one cook message routed to the bounded agent (`app/agent/loop.py`). `expected_tools` lists
+# the tool(s) a correct run MUST call at least once; `forbidden_tools` (optional) lists tools it must NOT
+# call. The metric is per-case pass = (every expected tool was called) AND (no forbidden tool was called),
+# aggregated to a tool-selection accuracy over the suite. This is an OFFLINE eval (it drives the real Groq
+# agent model and a live corpus); `evals/run_evals.py` runs it. It is NOT a `make test` gate — the wall and
+# the deterministic plan assembly are what guarantee safety regardless of which tools the model picks.
+#
+# Grounding note: these measure tool CHOICE, not answer text. The recipes/quantities themselves are still
+# produced deterministically by the tools and gated by the wall.
+
+cases:
+  - id: plan-three-day-dinners
+    message: "Plan 3 days of dinners for me."
+    expected_tools: [search_recipes]
+    notes: "A multi-day plan must retrieve real recipes; it never invents days."
+
+  - id: plan-week-varied
+    message: "Give me a varied 3-day meal plan with a shopping list."
+    expected_tools: [search_recipes]
+    notes: "Variety + a shopping list — at minimum it must search; building the list is also expected."
+
+  - id: shopping-list-for-two-dishes
+    message: "Make me one shopping list for a Thai green curry night and an Italian pasta night."
+    expected_tools: [search_recipes, build_shopping_list]
+    notes: "Two named dishes consolidated into a single list -> search then build_shopping_list."
+
+  - id: ideas-with-details
+    message: "Suggest a couple of dinner ideas and tell me what's in them."
+    expected_tools: [search_recipes]
+    notes: "Find recipes, then optionally open details — search is mandatory; get_recipe is welcome."
+
+  - id: plan-with-nutrition
+    message: "Plan two healthy dinners and tell me the calories of each."
+    expected_tools: [search_recipes]
+    notes: "Retrieve first; nutrition follows via get_nutrition on the chosen ids."
+
+  - id: vegetarian-plan-and-list
+    message: "Build a 3-day vegetarian dinner plan and a single grocery list."
+    expected_tools: [search_recipes]
+    notes: "Diet constraint is enforced by the wall around the tools; the agent still just searches."

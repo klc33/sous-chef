@@ -1,0 +1,95 @@
+# RAG golden set — labeled queries → the recipe(s) that SHOULD surface in the top-3 (hit@3 gate).
+#
+# Each case is one conversational search. `ideal` lists stable recipe identifiers (source + source_id)
+# of recipes that genuinely match the query, any of which counts as a hit when it appears among the 3
+# cards the cook actually sees. The gate metric is hit@3 = (cases with >=1 ideal in the surfaced 3) /
+# (total cases) — measured on the 3 displayed cards (FR-006), reconciled with the over-fetch pool.
+#
+# Curation: ideals were chosen by TITLE/content match against the ACTUAL ingested corpus (not the
+# embedding ranking, so the gate is not circular), and `category` is the category the matching recipes
+# truly live in (the search pre-filters by category, so an ideal must share it). Grounding note: ideals
+# are real corpus rows, never invented. Queries are constraint-free here (the wall is gated separately by
+# test_wall_regression); these measure retrieval relevance only.
+
+cases:
+  - query: "something Thai for dinner"
+    category: dinner
+    ideal:
+      - { source: themealdb, source_id: "53193" }   # Drunken noodles (pad kee mao)
+      - { source: themealdb, source_id: "52774" }   # Pad See Ew
+      - { source: themealdb, source_id: "53191" }   # Pad Thai
+      - { source: themealdb, source_id: "52827" }   # Massaman Beef curry
+
+  - query: "how many calories in chicken tikka masala?"
+    category: lunch
+    ideal:
+      - { source: kaggle, source_id: "418756" }     # chicken tikka masala (vegan style)
+
+  - query: "a hearty beef stew"
+    category: dinner
+    ideal:
+      - { source: themealdb, source_id: "53126" }   # Brun Lapskaus (Norwegian Beef Vegetable Stew)
+      - { source: themealdb, source_id: "53211" }   # Lemongrass beef stew with noodles
+      - { source: themealdb, source_id: "52873" }   # Beef Dumpling Stew
+
+  - query: "a light breakfast with eggs"
+    category: breakfast
+    ideal:
+      - { source: themealdb, source_id: "53076" }   # Bread omelette
+      - { source: kaggle, source_id: "204404" }     # 24 hour omelet
+      - { source: kaggle, source_id: "189437" }     # 40 second omelet
+      - { source: themealdb, source_id: "52962" }   # Salmon Eggs Benedict
+
+  - query: "a refreshing cold drink"
+    category: cold drink
+    ideal:
+      - { source: thecocktaildb, source_id: "12714" }  # Kiwi Papaya Smoothie
+      - { source: thecocktaildb, source_id: "12690" }  # Lassi - A South Indian Drink
+      - { source: thecocktaildb, source_id: "12674" }  # Fruit Shake
+      - { source: thecocktaildb, source_id: "12712" }  # Grape lemon pineapple Smoothie
+      - { source: thecocktaildb, source_id: "12670" }  # Fruit Cooler
+      - { source: thecocktaildb, source_id: "12704" }  # Limeade
+      - { source: thecocktaildb, source_id: "12618" }  # Orangeade
+
+  - query: "a warm drink for a cold night"
+    category: hot drink
+    ideal:
+      - { source: thecocktaildb, source_id: "12746" }  # Nuked Hot Chocolate
+      - { source: thecocktaildb, source_id: "12730" }  # Castillian Hot Chocolate
+      - { source: thecocktaildb, source_id: "12720" }  # Kill the cold Smoothie
+      - { source: thecocktaildb, source_id: "12734" }  # Chocolate Drink
+      - { source: thecocktaildb, source_id: "12736" }  # Drinking Chocolate
+      - { source: thecocktaildb, source_id: "12776" }  # Melya (warm honey drink)
+
+  - query: "pasta with tomato"
+    category: dinner
+    ideal:
+      - { source: themealdb, source_id: "52837" }   # Pilchard puttanesca
+      - { source: themealdb, source_id: "52844" }   # Lasagne
+      - { source: themealdb, source_id: "52982" }   # Spaghetti alla Carbonara
+      - { source: themealdb, source_id: "53177" }   # Spaghetti with Spanish flavours
+
+  - query: "a vegetarian chickpea curry"
+    category: lunch
+    ideal:
+      - { source: themealdb, source_id: "52785" }   # Dal fry
+      - { source: themealdb, source_id: "52868" }   # Kidney Bean Curry
+      - { source: themealdb, source_id: "53255" }   # Grilled aubergines with spicy chickpeas
+      - { source: themealdb, source_id: "52817" }   # Stovetop Eggplant with Harissa, Chickpeas
+
+  - query: "a rich chocolate drink"
+    category: hot drink
+    ideal:
+      - { source: thecocktaildb, source_id: "12732" }  # Chocolate Beverage
+      - { source: thecocktaildb, source_id: "12734" }  # Chocolate Drink
+      - { source: thecocktaildb, source_id: "12746" }  # Nuked Hot Chocolate
+
+  - query: "a quick chicken dinner"
+    category: dinner
+    ideal:
+      - { source: themealdb, source_id: "52846" }   # Chicken & mushroom Hotpot
+      - { source: themealdb, source_id: "52920" }   # Chicken Marengo
+      - { source: themealdb, source_id: "52850" }   # Chicken Couscous
+      - { source: themealdb, source_id: "52831" }   # Chicken Karaage
+      - { source: themealdb, source_id: "53164" }   # Spanish Chicken
+      - { source: themealdb, source_id: "53110" }   # Sticky Chicken
