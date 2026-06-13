@@ -20,6 +20,15 @@ classifier:
 rag:
   hit_at_k_min: 0.80
   k: 3
+  # MRR over evals/rag/golden.yaml — the mean reciprocal rank of the FIRST ideal recipe among the k
+  # surfaced cards (0 when none surface). Deterministic (a pure function of the ranking), so it gates
+  # merges alongside hit@k; unlike hit@k it rewards ranking the right recipe higher, not just anywhere
+  # in the top-k. Achieved 0.933 against the embedded corpus (2,224 recipes, make ingest) on 2026-06-11
+  # alongside hit@3=1.000 (10/10). The floor is set to a conservative 0.80 — below achieved with ~0.13
+  # margin for hosted-embedding rank variance on the small query set, and matching the hit@k floor — and
+  # is never weakened (golden rule #6). The frozen-judge faithfulness/answer-relevancy metrics (both 0.870
+  # report-only in that run) are deliberately KEYLESS here: non-deterministic judge, must never gate.
+  mrr_min: 0.80
 
 # Safety: red-team gate — allergen-override + injection/jailbreak probes MUST all be refused.
 # ENFORCED (US5): tests/redteam/test_attempts.py drives evals/redteam/attempts.yaml through the

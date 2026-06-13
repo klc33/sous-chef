@@ -55,6 +55,22 @@ class _FakeFavRepo:
         return (profile_id, recipe_id) in self.favs
 
 
+class _FakeProfilesRepo:
+    """In-memory stand-in for repo.profiles: record_seen calls ensure_exists to satisfy the FK in the DB.
+
+    Records the cooks ensure_exists was asked about so a test can assert the row-creation happened; here
+    it is a no-op (there is no DB FK to satisfy in a unit test).
+    """
+
+    def __init__(self) -> None:
+        """Start having ensured no cooks."""
+        self.ensured: list[str] = []
+
+    def ensure_exists(self, _session: Any, profile_id: str) -> None:
+        """Stand in for the real ensure_exists() call freshness makes before its first seen-history write."""
+        self.ensured.append(profile_id)
+
+
 @pytest.fixture
 def fakes(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeSeenRepo, _FakeFavRepo]:
     """Swap freshness's seen-history + favorites repos for in-memory fakes; return them for assertions."""
@@ -62,6 +78,9 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeSeenRepo, _FakeFavRepo]
     favs = _FakeFavRepo()
     monkeypatch.setattr(freshness, "repo_seen", seen)
     monkeypatch.setattr(freshness, "repo_favorites", favs)
+    # record_seen now ensures the cook's profile row exists (the seen_history FK) before its first write;
+    # stand it in too so these no-DB tests don't hit the real repo/session.
+    monkeypatch.setattr(freshness, "repo_profiles", _FakeProfilesRepo())
     return seen, favs
 
 

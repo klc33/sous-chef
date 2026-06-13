@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.recipe import Diet, Ingredient, NutritionCache, Recipe
@@ -112,6 +112,45 @@ def list_by_category(session: Session, category: str) -> list[Recipe]:
         .order_by(Recipe.title)
     ).scalars()
     return list(rows)
+
+
+def list_page(
+    session: Session,
+    *,
+    limit: int,
+    offset: int,
+    category: str | None = None,
+) -> list[Recipe]:
+    """Return one page of complete recipes (optionally one category), ingredients eager-loaded.
+
+    The read side of the operator corpus browse (admin, read-only inspection). Filters `is_complete = true`
+    so incomplete rows never surface, applies the optional exact-category filter, and orders by title for a
+    stable, pageable listing. `limit`/`offset` come pre-clamped from the service; ingredients are eager-loaded
+    because the admin card lists allergen/diet tags derived from the row's precomputed columns.
+    """
+    stmt = (
+        select(Recipe)
+        .where(Recipe.is_complete.is_(True))
+        .options(selectinload(Recipe.ingredients))
+        .order_by(Recipe.title)
+        .limit(limit)
+        .offset(offset)
+    )
+    if category is not None:
+        stmt = stmt.where(Recipe.category == category)
+    return list(session.execute(stmt).scalars())
+
+
+def count_complete(session: Session, *, category: str | None = None) -> int:
+    """Return the total count of complete recipes (optionally one category) for the corpus pager.
+
+    Matches the filter of `list_page` exactly (minus paging) so `total` and the returned page agree; a
+    single `COUNT(*)` rather than loading rows, so the pager stays cheap on the ~2k-row corpus.
+    """
+    stmt = select(func.count()).select_from(Recipe).where(Recipe.is_complete.is_(True))
+    if category is not None:
+        stmt = stmt.where(Recipe.category == category)
+    return int(session.execute(stmt).scalar_one())
 
 
 def search_by_vector(

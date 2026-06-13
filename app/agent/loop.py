@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import structlog
 from sqlalchemy.orm import Session
 
 from app.agent import tools
@@ -27,12 +28,40 @@ from app.config import get_settings
 from app.infra import llm_groq
 from app.services.user.constraint_guard import ConstraintProfile
 
+log = structlog.get_logger()
+
 # The agent's framing prompt (prompts are code — golden rule #7). Loaded per run so an edit takes effect.
 _AGENT_PROMPT = Path("prompts/agent_system.md")
 
 # Per-call output cap. The agent's turns are mostly short tool calls, so a modest cap keeps each round
 # cheap; the cumulative `agent_token_budget` is the real spend ceiling enforced across rounds below.
 _PER_CALL_MAX_TOKENS = 700
+
+# How many times to attempt one round's model call. The agent model occasionally emits a malformed or
+# mistyped tool call that Groq rejects with a 400 (`tool_use_failed`); since generation is stochastic, a
+# single immediate retry usually produces a well-formed call.
+_CALL_ATTEMPTS = 2
+
+
+def _call_model(messages: list[dict[str, Any]], settings: Any) -> Any | None:
+    """Call Groq with the tool specs for one round, retrying once on failure; None when it can't succeed.
+
+    Wraps `llm_groq.chat` so a provider/tool-call error no longer dies silently: every failure is logged
+    (so a reproducible break is visible in operations, not swallowed) and retried once, because a malformed
+    tool call from the stochastic model often comes out well-formed on a second try. Returns the response,
+    or None after `_CALL_ATTEMPTS` failures — the signal for the loop to stop with the best safe partial.
+    """
+    for attempt in range(_CALL_ATTEMPTS):
+        try:
+            return llm_groq.chat(
+                messages,
+                tools=tools.TOOL_SPECS,
+                model=settings.groq_agent_model,
+                max_tokens=_PER_CALL_MAX_TOKENS,
+            )
+        except Exception as exc:  # noqa: BLE001 — log + retry once, then end the loop gracefully
+            log.warning("agent.model_call_failed", attempt=attempt, error=str(exc))
+    return None
 
 
 @dataclass
@@ -111,15 +140,9 @@ def run(
     for _ in range(settings.agent_max_iterations):
         if tokens_used >= settings.agent_token_budget:
             break  # token bound hit — stop and return the best safe partial gathered so far
-        try:
-            response = llm_groq.chat(
-                messages,
-                tools=tools.TOOL_SPECS,
-                model=settings.groq_agent_model,
-                max_tokens=_PER_CALL_MAX_TOKENS,
-            )
-        except Exception:  # noqa: BLE001 — a provider error ends the loop gracefully, never crashes the turn
-            break
+        response = _call_model(messages, settings)
+        if response is None:
+            break  # the model call failed twice (logged) — end gracefully with the best safe partial
 
         tokens_used += _usage_tokens(response)
         choice_message = response.choices[0].message

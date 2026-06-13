@@ -1,0 +1,144 @@
+openapi: 3.1.0
+info:
+  title: SousChef — Admin (operator dashboard) API
+  version: 0.4.0
+  description: >
+    Operator-only endpoints the Streamlit dashboard calls: browse the ingested corpus, run the eval gates
+    on demand, and read metrics. Every endpoint is guarded by `admin_deps.require_operator`, which
+    validates a shared admin token resolved from Vault (the public cook widget holds no token and cannot
+    reach these). These are a SEPARATE surface from the cook endpoints (recipes/chat/favorites/profile),
+    which are unchanged. No recipe data here bypasses the wall; corpus browse is read-only operator
+    inspection and may include allergen/diet tags the cook card omits.
+servers:
+  - url: /
+components:
+  securitySchemes:
+    AdminToken:
+      type: http
+      scheme: bearer
+      description: Shared operator token resolved from Vault (ADMIN_API_TOKEN); sent by the dashboard.
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Category:
+      name: category
+      in: query
+      required: false
+      schema: { type: string, enum: [hot_drink, cold_drink, breakfast, lunch, dinner] }
+  schemas:
+    GateResult:
+      type: object
+      required: [name, status, detail]
+      properties:
+        name: { type: string }
+        status: { type: string, enum: [PASS, FAIL, SKIP] }
+        detail: { type: string, description: Human-readable measured-vs-threshold line. }
+    RecipeCardAdmin:
+      type: object
+      required: [id, title, category, source, source_id]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { type: string, enum: [hot_drink, cold_drink, breakfast, lunch, dinner] }
+        cuisine: { type: string, nullable: true }
+        source: { type: string }
+        source_id: { type: string }
+        allergens: { type: array, items: { type: string } }
+        diet_flags: { type: array, items: { type: string } }
+    CorpusPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RecipeCardAdmin' } }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    EvalRunResult:
+      type: object
+      required: [gates, thresholds, ran_at]
+      properties:
+        gates: { type: array, items: { $ref: '#/components/schemas/GateResult' } }
+        thresholds: { type: object, description: Echo of eval_thresholds.yaml (measured-vs-floor display). }
+        ran_at: { type: string, format: date-time }
+    MetricsSummary:
+      type: object
+      required: [classifier, routing, gates]
+      properties:
+        classifier:
+          type: object
+          required: [macro_f1]
+          properties:
+            macro_f1: { type: number }
+            per_class: { type: object, additionalProperties: { type: number } }
+        routing:
+          type: object
+          required: [workflow_pct, agent_pct, total_turns]
+          properties:
+            workflow_pct: { type: number }
+            agent_pct: { type: number }
+            total_turns: { type: integer }
+        gates:
+          type: array
+          items: { $ref: '#/components/schemas/GateResult' }
+        phoenix:
+          type: object
+          nullable: true
+          description: Deep-link only — per-turn token cost is viewed in the Phoenix UI, not rolled up here.
+          properties:
+            ui_base_url: { type: string, nullable: true }
+            trace_deep_link: { type: string, nullable: true, description: Link into the Phoenix trace/cost view. }
+security:
+  - AdminToken: []
+paths:
+  /admin/corpus:
+    get:
+      operationId: adminBrowseCorpus
+      summary: Browse the ingested recipe corpus (read-only operator inspection).
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Category'
+      responses:
+        '200':
+          description: A page of corpus rows.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorpusPage' }
+        '401': { description: Missing/invalid admin token. }
+        '403': { description: Token present but not authorized. }
+  /admin/evals/run:
+    post:
+      operationId: adminRunEvals
+      summary: Run the eval gates on demand and return the results table.
+      description: >
+        Invokes the in-process eval runner. Deterministic gates (classifier macro-F1, red-team refusal,
+        redaction leaks, RAG hit@k/MRR when corpus present) run; offline gates SKIP without a live
+        stack/keys. Mirrors `make evals`. Synchronous (the deterministic gate set is fast).
+      responses:
+        '200':
+          description: Gate results compared to committed thresholds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvalRunResult' }
+        '401': { description: Missing/invalid admin token. }
+        '403': { description: Token present but not authorized. }
+  /admin/metrics:
+    get:
+      operationId: adminMetrics
+      summary: Classifier metrics, workflow-vs-agent routing split, gate status, and Phoenix deep-link.
+      responses:
+        '200':
+          description: Operator metrics summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MetricsSummary' }
+        '401': { description: Missing/invalid admin token. }
+        '403': { description: Token present but not authorized. }

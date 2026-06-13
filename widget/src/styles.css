@@ -1,0 +1,416 @@
+/* SousChef cook widget — clean, professional, food-forward base styling.
+ *
+ * One small stylesheet (no CSS framework, matching the plain-JSX/no-extra-deps constitution). A warm,
+ * appetizing palette; generous whitespace; a two-column app shell that collapses on narrow screens.
+ * Class names match the components in src/components and src/App.jsx. */
+
+:root {
+  --bg: #fbf7f2;
+  --surface: #ffffff;
+  --ink: #2b2622;
+  --muted: #7a716a;
+  --line: #ece4da;
+  --accent: #c4571f; /* warm paprika */
+  --accent-ink: #ffffff;
+  --fav: #d33a4b;
+  --warn-bg: #fff4e5;
+  --warn-line: #f0c98a;
+  --error-bg: #fdecea;
+  --error-line: #f3b6ae;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(43, 38, 34, 0.08), 0 6px 16px rgba(43, 38, 34, 0.05);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 0.4em;
+  font-weight: 650;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ── App shell ──────────────────────────────────────────────────────────────── */
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.app__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.app__header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+
+.app__body {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 24px;
+  margin-top: 20px;
+}
+
+.app__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.app__main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 60vh;
+}
+
+@media (max-width: 760px) {
+  .app__body {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Constraints form ───────────────────────────────────────────────────────── */
+.constraints {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.field > span,
+.field legend {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.field select,
+.field input[type="number"],
+.field input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.allergen-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+fieldset.field {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+/* ── Buttons & links ────────────────────────────────────────────────────────── */
+button[type="submit"],
+.chatbox button {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-weight: 600;
+}
+
+button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  padding: 4px 6px;
+  font-weight: 600;
+}
+
+.link--active {
+  text-decoration: underline;
+}
+
+/* ── Category chips ─────────────────────────────────────────────────────────── */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 0.9rem;
+}
+
+.chip--active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+/* ── Chat box ───────────────────────────────────────────────────────────────── */
+.chatbox {
+  display: flex;
+  gap: 8px;
+}
+
+.chatbox input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* ── Recipe grid + cards ────────────────────────────────────────────────────── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.card__img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  background: #efe6da;
+}
+
+.card__img--placeholder {
+  display: block;
+}
+
+.card__body {
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 12px;
+  flex: 1;
+}
+
+.card__title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.card__cat {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.card__ings {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.card__fav {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  width: 34px;
+  height: 34px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--fav);
+}
+
+.card__fav--on {
+  background: var(--fav);
+  color: #fff;
+  border-color: var(--fav);
+}
+
+/* ── Recipe detail ──────────────────────────────────────────────────────────── */
+.detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+
+.detail__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail__top .card__fav {
+  position: static;
+}
+
+.detail__meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 0;
+}
+
+.detail__allergens {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.detail__steps li,
+.detail__ings li {
+  margin-bottom: 6px;
+}
+
+/* Honest placeholder when a recipe has no computed nutrition (rather than fake zeros). */
+.detail__nutrition--missing {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ── Plan / shopping / substitution / refusal ───────────────────────────────── */
+.plan__variety {
+  color: var(--muted);
+  margin: 0;
+}
+
+.plan__shortfall {
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.plan__days {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.plan__daynum {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.shopping,
+.subst,
+.plan {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.shopping__amt {
+  font-weight: 600;
+}
+
+.shopping__from,
+.subst__none {
+  color: var(--muted);
+}
+
+.refusal {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.refusal__icon {
+  font-size: 1.2rem;
+}
+
+/* ── Banners, loading, empty ────────────────────────────────────────────────── */
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 12px;
+}
+
+.banner--error {
+  background: var(--error-bg);
+  border: 1px solid var(--error-line);
+}
+
+.banner__close {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.loading,
+.empty {
+  color: var(--muted);
+  padding: 32px 8px;
+  text-align: center;
+}
+
+.glue {
+  color: var(--ink);
+  margin: 0 0 4px;
+}

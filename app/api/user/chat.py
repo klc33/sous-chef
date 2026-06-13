@@ -27,8 +27,8 @@ from app.repo import profiles as repo_profiles
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.shared import recipe_view
 from app.services.user import meal_plan as meal_plan_service
+from app.services.user import rag, workflow
 from app.services.user import router as router_service
-from app.services.user import workflow
 from app.services.user.constraint_guard import ConstraintProfile
 
 # Servings an unknown cook (no stored profile) is assumed to cook for — mirrors the rest of the app.
@@ -93,7 +93,11 @@ def _agent(
     elif cards:
         reply = "Here are some ideas based on what I found."
     else:
-        reply = "I'm not sure what you're after — could you tell me what you'd like to cook?"
+        # The agent surfaced nothing (e.g. a provider/tool-call failure that ended the loop early). Don't
+        # dead-end the cook: fall back to the deterministic search so a recipe-shaped request still returns
+        # real, wall-cleared cards. An honest empty result from search is itself a grounded answer (FR-009).
+        fallback = rag.search(session, message, cp, profile_id)
+        return ChatResponse(reply=fallback.reply, intent=intent, recipes=fallback.cards)
     return ChatResponse(reply=reply, intent=intent, recipes=cards)
 
 
@@ -130,6 +134,8 @@ def chat_turn(
     message = decision.sanitized_message or body.message
 
     intent_route = router_service.route(message)
+    # Record the workflow-vs-agent split for the operator dashboard (best-effort; no cache in unit tests).
+    router_service.record_decision(getattr(request.app.state, "cache", None), intent_route.route)
     if intent_route.route == "agent":
         response = _agent(session, intent_route.intent, message, cp, profile_id)
     else:

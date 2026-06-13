@@ -36,6 +36,28 @@ jobs:
       - name: Mypy type-check
         run: uv run mypy app
 
+  # ── Merge-blocking deterministic eval gates (no service containers — hermetic & reproducible) ──
+  # "Evals are the grade" (golden rule #6): this job runs the committed gates from eval_thresholds.yaml.
+  # It trains the classifier artifact fresh (fast TF-IDF + logistic regression, no torch) so the macro-F1
+  # gate is real without committing a binary, then runs the deterministic gates — classifier macro-F1,
+  # red-team refusal (must be 1.0), redaction leaks (must be 0). The offline RAG hit@3/MRR + agent + the
+  # report-only judge gates SKIP here (no provider keys / no embedded corpus), exactly as designed. A FAIL
+  # blocks merge — the fix is the cause, never a weakened threshold.
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install backend + test + ml + evals deps
+        run: uv sync --frozen --extra backend --group test --group ml --group evals
+      - name: Train the intent classifier (rebuild ml/artifacts/model.joblib)
+        run: make train
+      - name: Run deterministic eval gates
+        run: uv run python -m evals.run_evals
+
   # ── Full-stack smoke: real Postgres+Redis+Vault, run the migration, boot the app, hit /health ──
   smoke:
     runs-on: ubuntu-latest
@@ -104,5 +126,8 @@ jobs:
           echo "GET /health -> $code"
           test "$code" = "200"
 
-      - name: Run the smoke test suite
-        run: uv run pytest tests/integration/test_health_smoke.py -q
+      # The full suite runs HERE (not in the hermetic `gates` job) because the integration + red-team
+      # flows (chat, favorites, wall regression, admin) need this live Postgres+Redis+Vault stack. The
+      # pure safety gates (red-team, redaction) thus run in BOTH jobs — belt and suspenders.
+      - name: Run the full test suite (unit + integration + red-team)
+        run: uv run pytest tests/unit tests/integration tests/redteam -q

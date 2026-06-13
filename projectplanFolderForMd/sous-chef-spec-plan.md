@@ -404,6 +404,81 @@ RELEASE: rehearse the demo on the live URL; tag v0.1.0.
 
 ---
 
+### PHASE 6 — Operability & Model Flexibility  → `specs/006-pgadmin-and-openai`
+**Objective:** make the running system easier to operate and the LLM provider a one-line swap — without
+adding weight or breaking the wall.
+**Features:** a **pgAdmin** service in the local stack for visual DB inspection/repair (local/dev only,
+never deployed); a **provider-agnostic LLM seam** so chat generation runs on **Groq OR OpenAI**, chosen by
+a single config value with no code change, both serving the identical tool-calling contract; OpenAI key in
+Vault; docs + a tiny contract test that both adapters satisfy.
+**Effort:** ~1.5 days. **Dependencies:** Phase 3 (the LLM + agent it abstracts); Phase 1 (the compose stack).
+
+```
+/speckit.specify
+Add operability and model flexibility to Sous-Chef without growing the stack or touching safety.
+WHAT:
+- A pgAdmin web UI wired to the existing Postgres so the operator can inspect/repair the corpus,
+  favorites, and seen-history visually instead of raw psql. It is a LOCAL/DEV convenience only and is
+  never part of the deployed (Railway) stack.
+- A provider-agnostic LLM seam: the chat/agent generation provider is selectable between Groq (default)
+  and OpenAI by ONE setting (e.g. LLM_PROVIDER), with zero call-site changes. Both providers expose the
+  same `chat(messages, tools?, max_tokens?, model?)` contract and the same native tool-calling shape, so
+  the router, RAG explainer, and bounded agent are unaware of which one is active.
+WHY:
+- Operability (P7): a junior operator must be able to see and fix data on demo day without memorizing SQL.
+- Resilience & portability (P1/P10): a single hosted LLM is a single point of failure and a single bill;
+  a clean seam lets you fail over, A/B tool-call reliability and cost, and avoid lock-in — at no extra
+  dependency, since the `openai` SDK is already vendored for embeddings.
+USER STORIES:
+- As the operator, I open pgAdmin, browse tables, and run a query to confirm a recipe's allergen tags.
+- As the operator, I switch the LLM provider from Groq to OpenAI by changing one config value and
+  restarting — every chat turn, meal plan, and tool call keeps working unchanged.
+FUNCTIONAL REQUIREMENTS:
+- pgAdmin connects to the existing `postgres` service; its server connection is pre-provisioned so it
+  works on first boot; it is excluded from the production deploy.
+- The LLM seam picks the provider from config at startup; an unknown/missing value fails fast with a clear
+  error. The OpenAI API key is read from Vault (never env/code/image), exactly like GROQ_API_KEY.
+- The tool-calling contract (tool specs, validated tool inputs, bounded loop, wall) is identical across
+  providers; swapping the provider changes neither behavior contracts nor the safety guarantees.
+ACCEPTANCE:
+- `docker-compose up` brings up pgAdmin alongside the stack; it is reachable locally and pre-connected to
+  Postgres; the deployed stack does NOT include it.
+- With LLM_PROVIDER=openai the full demo (search, nutrition, substitution, a meal plan) runs end-to-end;
+  flipping back to groq also runs end-to-end — no code change between the two.
+- A contract test asserts both adapters satisfy the same interface and return tool calls in the same shape.
+- No secret (OpenAI key, pgAdmin password) appears in any log, trace, image, or `.env.example`.
+CONSTRAINTS: no torch; no new runtime Python dependency for OpenAI chat (reuse the vendored `openai` SDK);
+pgAdmin is local-only; the wall and guardrails stay deterministic and provider-independent (golden rules
+1, 2, 4); prompts stay in `prompts/` and unchanged by the swap.
+```
+```
+/speckit.plan
+LLM SEAM (app/infra/llm/): introduce a small provider package — base.py (an `LLMClient` Protocol with
+`chat(messages, *, tools=None, max_tokens=None, model=None)`), groq.py (the existing Groq adapter moved
+here, Vault GROQ_API_KEY, 429 retry kept), openai.py (new, using the already-vendored `openai` SDK +
+Vault OPENAI_API_KEY), and a `get_client()` factory selecting by `settings.llm_provider`. Keep a stable
+module-level facade `app/infra/llm.chat(...)` so existing callers (services/user/rag.py,
+app/agent/loop.py) and tests depend on ONE seam and need no edits beyond the import; tests monkeypatch
+`llm.chat`. CONFIG (app/config.py, non-secrets): `llm_provider` (groq|openai, default groq),
+`openai_model`, `openai_agent_model`; document them in .env.example next to the GROQ_MODEL knobs. SECRET:
+add OPENAI_API_KEY to scripts/seed_vault.sh and the VaultAdapter lookups; .env.example only notes it is a
+Vault secret. DEPENDENCIES: none new — `openai>=2.41.0` is already in the backend group (embeddings).
+PGADMIN (docker-compose.yml): add a `pgadmin` service (dpage/pgadmin4) under a `local`/dev profile,
+depends_on postgres, published on a local port, with PGADMIN_DEFAULT_EMAIL/PASSWORD as local-only
+convenience env in .env.example (NOT Vault, NOT deployed) and a mounted servers.json pre-provisioning the
+Postgres connection. Exclude it from the Railway service set (Phase 5). Add a `make pgadmin` convenience
+note and a RUNBOOK entry. TESTING: a fake `LLMClient` for unit/integration tests; a contract test that
+both real adapters satisfy the Protocol and emit the same tool-call shape (mock transport, no network);
+optionally parametrize the agent tool-selection eval by provider (report-only). DOCS: DECISIONS.md (why a
+seam + the swap mechanism, with the tool-call-reliability/cost rationale), SECURITY.md (OpenAI key in
+Vault; pgAdmin local-only, never exposed in prod), RUNBOOK.md (open pgAdmin; flip the provider).
+```
+```
+/speckit.tasks      # then /speckit.implement, then: make lint && make test && make evals (all green, both providers)
+```
+
+---
+
 ## 5. Architecture
 
 ### 5.1 High-Level (monolith)
@@ -551,6 +626,7 @@ Phoenix and via the dashboard.
 | 8 | Build method unspecified | **GitHub SpecKit** drives the lifecycle | Spec-driven development (P9) | Constitution P9 · Section 2 |
 | 9 | Profile implicitly anonymous-only | **Passwordless persistent profile**; real accounts out of scope | Favorites must survive sessions without full auth (P2/P6) | Section 4 (Phase 2) |
 | 10 | **One SpecKit cycle for the whole project** | **One Constitution + one specify→plan→tasks cycle PER PHASE** (Section 4) | The whole-project cycle produced an unreviewable plan/task list and violated P2/P3; phase-by-phase cycles are how SpecKit is meant to be used and keep work reviewable | Section 2 (Execution Model) · Section 4 (entire plan restructured) |
+| 11 | Single LLM provider (Groq); no DB admin UI | **Provider-agnostic LLM seam** (Groq default, OpenAI swappable by one config value) + **pgAdmin** for local DB ops | Avoid single-provider lock-in/outage and enable cost/tool-call A/B at no new dependency (the `openai` SDK is already vendored); give the operator visual DB inspection without raw psql — both behind config and local-only, honoring P1/P7/P10 | Section 4 (new Phase 6) · Architecture · AI Engineering |
 
 **Obsolete content removed:** the single project-wide `/speckit.specify` and `/speckit.plan` blocks
 (replaced by per-phase commands); Anthropic LLM; TypeScript frontend; Langfuse tracing; flat service

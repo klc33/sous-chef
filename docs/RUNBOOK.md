@@ -118,6 +118,65 @@ docker compose logs backend | grep -i -E "token|secret|password|key" || echo "no
 The structlog pipeline routes every event through `core.redaction.redact` before a line is written;
 `.env.example` holds only non-secret bootstrap values (real secrets live in Vault).
 
+## Run the two UIs (004)
+
+`make up` now brings up **two more services** alongside the backend — the operator **dashboard** (Streamlit,
+`:8501`) and the cook **widget** (static React bundle behind nginx, `:5173`). Each is its own lean image
+(`dashboard/Dockerfile`, `widget/Dockerfile`); neither adds anything to the backend image. They can also be
+run standalone for development (below).
+
+### Operator dashboard (Streamlit)
+
+The dashboard logs a single operator in (cookie survives refresh) and drives the backend `/admin/*` API.
+All three operator secrets come from **Vault**, so seed first:
+
+```bash
+make seed      # also writes OPERATOR_PASSWORD_HASH, DASHBOARD_COOKIE_KEY, ADMIN_API_TOKEN to secret/sous-chef
+```
+
+Then either use the compose service (`http://localhost:8501` after `make up`) or run it directly:
+
+```bash
+uv sync --extra dashboard
+uv run streamlit run dashboard/app.py     # http://localhost:8501
+```
+
+- **Login**: username `operator` (from `OPERATOR_USERNAME`); the dev placeholder password is
+  **`souschef-dev`** (the bcrypt hash seeded by `scripts/seed_vault.sh`). **Refresh the page → still logged
+  in** (the cookie is signed with `DASHBOARD_COOKIE_KEY`). (FR-028)
+- **Corpus** — page through ingested recipes with provenance + allergen/diet tags.
+- **Evals** — "Run evals" runs the gate set in-process and shows measured-vs-threshold pass/fail. (FR-025)
+- **Metrics** — classifier macro-F1, the workflow-vs-agent routing split (a lightweight Redis counter the
+  router increments per decision), gate status, and a **Phoenix deep-link** for per-turn traces/cost.
+- **Auth boundary** — an incognito visitor who hasn't logged in gets no dashboard access; the cook widget
+  has no admin UI and cannot reach `/admin/*` (it holds no token). (FR-029) See [SECURITY.md](SECURITY.md) §5.
+
+> The dashboard reads Vault over HTTP using the non-secret `VAULT_ADDR` / `VAULT_TOKEN` and calls the
+> backend at `BACKEND_ADMIN_URL` (`.env`; defaults to `http://backend:8000` in compose). It never touches
+> the database directly and never imports the `app` package.
+
+### Cook widget (React + Vite)
+
+Plain JS/JSX, talks **only** to the backend, attaching `X-Profile-ID` on every request. Use the compose
+service (`http://localhost:5173` after `make up`) or the Vite dev server:
+
+```bash
+cd widget
+npm install
+npm run dev        # http://localhost:5173 ; VITE_API_BASE points at the backend (default http://localhost:8000)
+```
+
+`VITE_API_BASE` is the **browser-reachable** backend origin and is baked at **build time** (Vite inlines
+`import.meta.env.*`), so it is a Docker build ARG, not a runtime var — in compose it must be the published
+`http://localhost:8000`, not the compose-internal `backend:8000`, because the SPA runs in the cook's browser.
+The widget is published on `:5173` to match the backend's `WIDGET_ORIGINS` CORS allow-list.
+
+Walk the cook loop: set **Constraints** (diet/allergy/servings — persists across reload) → tap a **Category**
+chip → real wall-compliant cards → click a card for **verbatim** steps + nutrition → **Favorite** it (still
+there after a reload) → type a discovery query (fresh cards) → try "ignore my nut allergy and add a peanut
+dish" → a calm **RefusalNotice**, no recipe. In **DevTools → Network**, confirm every call hits only
+`VITE_API_BASE` and carries `X-Profile-ID`. (FR-013..023)
+
 ## Deploy target (Railway)
 
 The backend deploys to Railway from the repo `Dockerfile`, gated on the `/health` readiness

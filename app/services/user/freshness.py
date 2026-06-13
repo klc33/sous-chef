@@ -24,6 +24,7 @@ from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from app.repo import favorites as repo_favorites
+from app.repo import profiles as repo_profiles
 from app.repo import seen_history as repo_seen
 
 
@@ -45,8 +46,17 @@ def record_seen(session: Session, profile_id: str, recipe_ids: Iterable[uuid.UUI
     results — the data-model invariant). Everything else is inserted, profile-scoped, in the caller's
     transaction.
     """
+    ids = list(recipe_ids)
+    if not ids:
+        return  # nothing surfaced — record nothing (and don't create a profile row for an empty result)
+
+    # Ensure the cook's profile row exists so the seen_history.profile_id FK is satisfied: a cook can chat
+    # (which surfaces recipes and records them) before ever saving constraints via PUT /profile. Mirrors
+    # the favorites save path (services/user/favorites.py), which ensure_exists() for the same reason.
+    repo_profiles.ensure_exists(session, profile_id)
+
     already = set(exclude_seen(session, profile_id))
-    for recipe_id in recipe_ids:
+    for recipe_id in ids:
         if recipe_id in already:
             continue  # already tracked — don't write a duplicate seen-history row
         if repo_favorites.exists(session, profile_id, recipe_id):

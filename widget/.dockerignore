@@ -1,0 +1,19 @@
+# Keep the widget build context small. The Dockerfile runs `npm ci` from the lockfile inside the image,
+# so the host's installed deps and prior build output must never be copied in (they would bloat the
+# context and can shadow the clean install).
+node_modules/
+dist/
+.vite/
+
+# Env files are non-secret for the widget (VITE_API_BASE is baked at build via a build ARG), but keep
+# any local overrides out of the image regardless.
+.env
+.env.*
+!.env.example
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

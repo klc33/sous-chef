@@ -18,12 +18,25 @@ VAULT_TOKEN="${VAULT_TOKEN:-root}"
 GROQ_API_KEY="${GROQ_API_KEY:-dev-placeholder-groq-key}"
 EMBEDDINGS_API_KEY="${EMBEDDINGS_API_KEY:-dev-placeholder-embeddings-key}"
 
+# Operator-dashboard secrets (004-evals-and-uis). Same env-forward-or-placeholder pattern as the
+# provider keys above: real values are exported in the operator's shell before `make seed`; a fresh
+# boot falls back to working DEV placeholders so the dashboard logs in out of the box. Key names match
+# app.config.VAULT_KEY_* and what admin_deps / dashboard auth look up at runtime.
+#   OPERATOR_PASSWORD_HASH — bcrypt hash streamlit-authenticator checks. Dev default is the hash of
+#     the password "souschef-dev" (the `\$` keep the literal '$' segments out of shell expansion).
+#   DASHBOARD_COOKIE_KEY   — signs the login cookie so a refresh keeps the operator logged in.
+#   ADMIN_API_TOKEN        — shared bearer token the dashboard sends; the backend fails fast without it.
+OPERATOR_PASSWORD_HASH="${OPERATOR_PASSWORD_HASH:-\$2b\$12\$krAZGw9bKfb8eWOFFCi8iuajtqTRzI9jrJ.PfEgGUiW/cTmy37eVe}"
+DASHBOARD_COOKIE_KEY="${DASHBOARD_COOKIE_KEY:-dev-placeholder-dashboard-cookie-key}"
+ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-dev-placeholder-admin-api-token}"
+
 # KV v2 data path is /v1/<mount>/data/<path>. Body wraps values under "data". The key names here are
-# exactly what VaultAdapter.get(...) looks up at runtime (GROQ_API_KEY, EMBEDDINGS_API_KEY).
+# exactly what VaultAdapter.get(...) looks up at runtime (GROQ_API_KEY, EMBEDDINGS_API_KEY, and the
+# operator-auth keys OPERATOR_PASSWORD_HASH, DASHBOARD_COOKIE_KEY, ADMIN_API_TOKEN).
 curl -sf -X POST \
   -H "X-Vault-Token: ${VAULT_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "{\"data\":{\"app_secret\":\"dev-placeholder-not-a-real-secret\",\"GROQ_API_KEY\":\"${GROQ_API_KEY}\",\"EMBEDDINGS_API_KEY\":\"${EMBEDDINGS_API_KEY}\"}}" \
+  -d "{\"data\":{\"app_secret\":\"dev-placeholder-not-a-real-secret\",\"GROQ_API_KEY\":\"${GROQ_API_KEY}\",\"EMBEDDINGS_API_KEY\":\"${EMBEDDINGS_API_KEY}\",\"OPERATOR_PASSWORD_HASH\":\"${OPERATOR_PASSWORD_HASH}\",\"DASHBOARD_COOKIE_KEY\":\"${DASHBOARD_COOKIE_KEY}\",\"ADMIN_API_TOKEN\":\"${ADMIN_API_TOKEN}\"}}" \
   "${VAULT_ADDR}/v1/secret/data/sous-chef" >/dev/null
 
-echo "seed_vault: wrote secret/sous-chef (app_secret, GROQ_API_KEY, EMBEDDINGS_API_KEY) to ${VAULT_ADDR}"
+echo "seed_vault: wrote secret/sous-chef (app_secret, GROQ_API_KEY, EMBEDDINGS_API_KEY, OPERATOR_PASSWORD_HASH, DASHBOARD_COOKIE_KEY, ADMIN_API_TOKEN) to ${VAULT_ADDR}"

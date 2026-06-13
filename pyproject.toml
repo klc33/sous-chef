@@ -43,6 +43,16 @@ backend = [
   # only if a model-backed rail is ever actually imported.
 ]
 
+# ── DASHBOARD IMAGE (the Streamlit operator console) ──────────────────────────
+# Its own image, never mixed into the backend (golden rule #3 — keep images lean).
+# UI deps only (FR-030): cookie login + an HTTP client for the /admin/* API + table rendering.
+dashboard = [
+  "streamlit",                       # operator console (corpus / evals / metrics)
+  "streamlit-authenticator",         # cookie login that survives refresh (creds + key from Vault)
+  "httpx",                           # calls the backend /admin/* API (admin token from Vault)
+  "pandas",                          # tabular rendering for corpus/eval/metric views
+]
+
 [dependency-groups]
 # These NEVER ship in a serving image — local/CI/job only.
 dev  = ["ruff", "mypy"]

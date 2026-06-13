@@ -83,7 +83,7 @@ injection/jailbreak probes must all be refused) and the **redaction** test. Then
 the running stack (`make up`).
 
 <!-- SPECKIT START -->
-Active feature: **003-intelligent-behavior**. For technologies, project structure, shell commands,
-and other context for the current work, read the plan at `specs/003-intelligent-behavior/plan.md`
+Active feature: **004-evals-and-uis**. For technologies, project structure, shell commands,
+and other context for the current work, read the plan at `specs/004-evals-and-uis/plan.md`
 (with its `research.md`, `data-model.md`, `contracts/`, and `quickstart.md`).
 <!-- SPECKIT END -->

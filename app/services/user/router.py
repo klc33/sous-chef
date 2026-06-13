@@ -5,7 +5,8 @@ Every turn flows through here right after the input rail. `route(message)` calls
 contracts/classifier.md:
   * zero-signal (no known vocabulary matched) → clarify (cheap re-prompt; NEVER the agent — FR-004a)
   * `plan_meals`                          → agent (the multi-step, multi-tool path)
-  * confidence < `router_confidence_threshold` WITH real signal → agent (escalate to the safer, capable path)
+  * confidence < `router_confidence_threshold` WITH real signal (and NOT find_recipe) → agent (escalate)
+  * `find_recipe`                         → workflow ALWAYS (semantic search is its home at any confidence)
   * `out_of_scope`                        → refuse (safe canned redirect)
   * everything else                       → workflow (deterministic handler)
 
@@ -18,8 +19,9 @@ wall + output rail (FR-004).
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from app.classifier import predict as classifier
 from app.config import get_settings
@@ -30,6 +32,28 @@ Route = Literal["workflow", "agent", "refuse", "clarify"]
 
 # Intent label assigned to a zero-signal turn (no real classification happened — see FR-004a).
 LOW_SIGNAL_INTENT = "low_signal"
+
+# Redis keys for the workflow-vs-agent routing split the operator dashboard reads (004-evals-and-uis,
+# FR-026). Only the hard `agent` fork counts as "agent"; every deterministic path (workflow / refuse /
+# clarify) counts as "workflow", so the split mirrors the turn fork the metric is about.
+ROUTING_COUNTER_AGENT = "routing:agent"
+ROUTING_COUNTER_WORKFLOW = "routing:workflow"
+
+
+def record_decision(cache: Any, route: Route) -> None:
+    """Increment the workflow-vs-agent routing counter for one routing decision — best-effort, never fatal.
+
+    The operator dashboard derives its routing split from these two Redis counters (no new table). The
+    `agent` fork bumps `routing:agent`; every deterministic route bumps `routing:workflow`. Metrics must
+    never break a cook's turn, so a missing cache or any Redis error is swallowed silently (the counter is
+    observability, not correctness) — exactly the posture tracing takes.
+    """
+    if cache is None:
+        return
+    key = ROUTING_COUNTER_AGENT if route == "agent" else ROUTING_COUNTER_WORKFLOW
+    # A metrics counter must never propagate into the turn path — swallow any Redis hiccup, like tracing.
+    with contextlib.suppress(Exception):
+        cache.client.incr(key)
 
 
 @dataclass(frozen=True)
@@ -58,8 +82,15 @@ def route(message: str) -> IntentRoute:
         return IntentRoute(LOW_SIGNAL_INTENT, prediction.confidence, "clarify")
 
     # Below the confidence floor (but with real signal) → escalate to the agent rather than risk a wrong
-    # deterministic handler.
-    if prediction.confidence < settings.router_confidence_threshold:
+    # deterministic handler — EXCEPT for find_recipe. Semantic search IS the right home for any recipe
+    # query at any confidence, so a terse-but-clear ask like "pizza" or "italian pizza" (which classifies
+    # as find_recipe but at low confidence, ~0.3) stays on the cheap, reliable workflow instead of paying
+    # the agent's slower, tool-call-flaky path for no benefit. The confidence threshold can't separate
+    # "correct but terse" from "genuinely ambiguous" for these, so we route by intent, not by number.
+    if (
+        prediction.confidence < settings.router_confidence_threshold
+        and prediction.intent != "find_recipe"
+    ):
         return IntentRoute(prediction.intent, prediction.confidence, "agent")
 
     if prediction.intent == "plan_meals":

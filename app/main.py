@@ -12,7 +12,9 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.admin import register_admin_routers
 from app.api.health import register_health_router
 from app.api.user import register_user_routers
 from app.config import get_settings
@@ -65,12 +67,28 @@ def create_app() -> FastAPI:
     app.state.db = db
     app.state.cache = cache
 
+    # Cross-origin access for the cook widget (a browser SPA on its own origin calling this backend at
+    # VITE_API_BASE). Without this, the browser blocks every widget request at the CORS preflight. The
+    # allow-list is non-secret config (widget origins, not credentials); we allow the cook verbs + the
+    # X-Profile-ID identity header the widget sends on every call. No credentials/cookies are used by the
+    # widget (identity is the header), so allow_credentials stays False.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.widget_origins_list,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["X-Profile-ID", "Content-Type"],
+        allow_credentials=False,
+    )
+
     # Emit one redacted span per request (no-op if tracing did not configure).
     add_tracing_middleware(app, tracer)
 
     register_error_handlers(app)
     register_health_router(app)
     register_user_routers(app)
+    # Operator-only surface (corpus / evals / metrics), each guarded by the Vault admin token. The public
+    # widget holds no token and cannot reach these (FR-029); the Streamlit dashboard sends the token.
+    register_admin_routers(app)
 
     return app
 

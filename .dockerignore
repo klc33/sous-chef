@@ -34,7 +34,10 @@ ml/*
 ml/artifacts/*
 !ml/artifacts/model.joblib
 ingestion/
-evals/
+# evals/ IS bundled into the backend image: the operator dashboard's on-demand eval run
+# (POST /admin/evals/run) invokes evals.run_evals in-process, so the runner + its data files
+# (testset.csv, attempts.yaml, golden.yaml, cases.yaml) and eval_thresholds.yaml must ship. The
+# Dockerfile copies them explicitly; deps it needs (yaml/joblib/sklearn) are already in the backend extra.
 docs/
 projectplanFolderForMd/
 specs/

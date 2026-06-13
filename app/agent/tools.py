@@ -170,7 +170,11 @@ TOOL_SPECS: list[dict[str, Any]] = [
                 "properties": {
                     "query": {"type": "string", "description": "What to cook (cuisine, dish, ingredients)."},
                     "category": {"type": "string", "enum": _CATEGORY_ENUM},
-                    "k": {"type": "integer", "minimum": 1, "maximum": 3},
+                    # Accept integer OR string: the agent model (llama) sometimes emits this numeric arg as
+                    # a string ("3"), which Groq's strict server-side tool validation 400-rejects if we
+                    # advertise integer-only. The Pydantic model (SearchRecipesInput.k, ge=1 le=3) coerces
+                    # the string and still enforces the real bounds, so safety/limits are unchanged.
+                    "k": {"type": ["integer", "string"], "description": "Number of cards, 1-3 (default 3)."},
                 },
                 "required": ["query"],
             },

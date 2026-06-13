@@ -1,6 +1,7 @@
-# Local development stack for SousChef: five services brought up with one command.
-# Backend starts only after Postgres, Redis, and Vault report healthy (depends_on), then runs
-# the Alembic baseline, seeds dev Vault secrets, and launches uvicorn. See README Quickstart.
+# Local development stack for SousChef: backend + datastores + the two UIs, brought up with one command.
+# Backend starts only after Postgres, Redis, and Vault report healthy (depends_on), then runs the Alembic
+# baseline, seeds dev Vault secrets, and launches uvicorn. The operator dashboard (Streamlit) and the cook
+# widget (static React bundle) are sibling surfaces in their own lean images. See README Quickstart.
 
 services:
   backend:
@@ -68,6 +69,39 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Operator console (US3). Its own lean image (dashboard extra only — streamlit/authenticator/httpx/
+  # pandas, no backend libs). Reads operator secrets from Vault over HTTP and drives the backend /admin/*
+  # API with the Vault-issued admin token; never touches the DB directly. Depends on the backend because
+  # the backend's start command is what seeds Vault (scripts/seed_vault.sh) with the operator secrets.
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    env_file:
+      - .env          # BACKEND_ADMIN_URL, OPERATOR_USERNAME, VAULT_ADDR, VAULT_TOKEN (all non-secret)
+    ports:
+      - "8501:8501"
+    depends_on:
+      vault:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  # Cook widget (US2): the React bundle built by Vite and served static by nginx. VITE_API_BASE is baked
+  # at BUILD time (Vite inlines import.meta.env.*), so it is a build ARG — and it must be the
+  # BROWSER-reachable backend origin (the published localhost:8000), not the compose-internal hostname,
+  # because the SPA runs in the cook's browser. Published on 5173 to match the WIDGET_ORIGINS allow-list.
+  widget:
+    build:
+      context: ./widget
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_started
 
   phoenix:
     image: arizephoenix/phoenix:latest

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hvac
 
-from app.config import Settings
+from app.config import VAULT_KEY_ADMIN_API_TOKEN, Settings
 from app.core.errors import StartupConfigError
 
 # KV v2 mount + path where scripts/seed_vault.sh writes the app's secrets.
@@ -40,6 +40,15 @@ class VaultAdapter:
             )
             self._secrets = dict(resp["data"]["data"])
             self._loaded = True
+            # The backend cannot guard /admin/* without the shared operator token, so its absence
+            # is a startup error here rather than a late failure on the first admin request. The
+            # dashboard-only secrets (password hash, cookie key) are validated by the dashboard
+            # itself, since the backend never needs them (004-evals-and-uis data-model).
+            if VAULT_KEY_ADMIN_API_TOKEN not in self._secrets:
+                raise StartupConfigError(
+                    f"Required secret '{VAULT_KEY_ADMIN_API_TOKEN}' not found in Vault "
+                    "(run `make seed` / scripts/seed_vault.sh to write operator secrets)"
+                )
         except StartupConfigError:
             raise
         except Exception as exc:  # hvac raises several connection/HTTP error types

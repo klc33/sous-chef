@@ -17,6 +17,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # startup (fail-fast) rather than letting a mismatched vector reach the DB and error mid-query.
 MIGRATION_EMBEDDINGS_DIM = 1536
 
+# ── Operator-dashboard auth: canonical Vault KV key names (004-evals-and-uis) ──────────────
+# The single operator's password HASH, the cookie-signing key, and the shared admin API token
+# are SECRETS — they live only in Vault (golden rule #4), never in env or this file. Centralizing
+# the key names here keeps the seed script (scripts/seed_vault.sh), the backend's admin_deps, and
+# the Streamlit dashboard all reading the SAME keys. The username is non-secret (env field below).
+VAULT_KEY_OPERATOR_PASSWORD_HASH = "OPERATOR_PASSWORD_HASH"
+VAULT_KEY_DASHBOARD_COOKIE_KEY = "DASHBOARD_COOKIE_KEY"
+VAULT_KEY_ADMIN_API_TOKEN = "ADMIN_API_TOKEN"
+
 
 class Settings(BaseSettings):
     """Non-secret settings loaded from environment / .env at process start.
@@ -80,6 +89,34 @@ class Settings(BaseSettings):
     # Vector-search over-fetch size: how many candidates to pull before the allergen wall trims to
     # the 3 displayed cards. Must exceed the display count so wall-compliant cards still surface.
     retrieval_candidate_pool: int = Field(default=20)
+
+    # ── 004-evals-and-uis: operator dashboard login name (non-secret) ─────────────────────────
+    # The single operator's username on the Streamlit dashboard. Non-secret, so it comes from env
+    # (see .env.example OPERATOR_USERNAME). The matching password hash, cookie-signing key, and
+    # shared admin token are SECRETS and come from Vault (see the VAULT_KEY_* constants above).
+    operator_username: str = Field(default="operator")
+
+    # ── 004-evals-and-uis: cook-widget CORS allow-list (non-secret) ───────────────────────────
+    # The React widget is a browser SPA served from its OWN origin (the Vite dev server on :5173, or
+    # the static widget container in compose/Railway) and calls the backend at VITE_API_BASE — a
+    # DIFFERENT origin. A browser therefore preflights every request, so the backend must echo the
+    # widget origin(s) in its CORS headers or the call is blocked. This is a comma-separated allow-list
+    # of permitted origins; defaults cover the Vite dev (5173) and `vite preview` (4173) ports. It is
+    # non-secret config (origins, not credentials) and is enforced by CORSMiddleware in main.py. Both the
+    # `localhost` and `127.0.0.1` spellings are included because a browser treats them as distinct origins,
+    # and opening the dev server on either is common — omitting one blocks the widget with an opaque fetch
+    # failure. (In dev the Vite proxy makes calls same-origin anyway; this is the belt to that suspenders.)
+    widget_origins: str = Field(
+        default=(
+            "http://localhost:5173,http://localhost:4173,"
+            "http://127.0.0.1:5173,http://127.0.0.1:4173"
+        )
+    )
+
+    @property
+    def widget_origins_list(self) -> list[str]:
+        """Parse `widget_origins` into a clean list of origins (drops blanks/whitespace)."""
+        return [o.strip() for o in self.widget_origins.split(",") if o.strip()]
 
     @model_validator(mode="after")
     def _assert_embeddings_dim_matches_migration(self) -> Settings:

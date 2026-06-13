@@ -84,6 +84,29 @@ secrets).
 - **Identity**: the cook is a passwordless `X-Profile-ID` header used only for favorites + seen-history;
   the owner/tenant is never taken from the request body.
 
+## 5. Operator auth — two Vault-sourced boundaries (004)
+
+The operator surface (the `/admin/*` API + the Streamlit dashboard) adds **no end-user auth system**; it is
+guarded by **two boundaries, both keyed from Vault** (research R3). Every operator secret lives in Vault KV
+v2 `secret/sous-chef` — never in `.env`, code, or an image (golden rule #4). The keys are seeded by
+[scripts/seed_vault.sh](../scripts/seed_vault.sh) (dev placeholders out of the box; real values forwarded
+from the operator's shell) and read at startup via [app/config.py](../app/config.py) /
+[app/infra/vault.py](../app/infra/vault.py); the backend **fails fast** if `ADMIN_API_TOKEN` is missing.
+
+| Boundary | Secret (Vault key) | Mechanism |
+|---|---|---|
+| **Human → dashboard** | `OPERATOR_PASSWORD_HASH` (bcrypt), `DASHBOARD_COOKIE_KEY` | `streamlit-authenticator` cookie login; the cookie is signed with the Vault key so a **refresh stays logged in** (FR-028). The hash is pre-computed — the dashboard never sees a plaintext password and `auto_hash=False` prevents re-hashing. |
+| **Dashboard → backend** | `ADMIN_API_TOKEN` (shared bearer) | The dashboard attaches `Authorization: Bearer <token>` on every `/admin/*` call; [app/api/admin_deps.py](../app/api/admin_deps.py) `require_operator` validates it (401 missing/malformed, 403 wrong token) and gates every admin route. |
+
+**Boundary properties**:
+
+- The **public widget holds no token** and cannot reach `/admin/*` (FR-029) — it only calls the
+  profile-scoped user endpoints. The admin and cook surfaces share the monolith but not the trust level.
+- The dashboard reads Vault **over HTTP** (it carries `httpx`, not `hvac`) and **never imports the `app`
+  package** — it is the dashboard image's only secrets touchpoint, keeping that image lean and decoupled.
+- Admin endpoints stay read-only inspection / on-demand eval runs (corpus browse, `evals/run`, metrics);
+  the corpus browse goes through `repo/recipes` (parameterized, P3), never raw SQL.
+
 ## Success-criteria coverage
 
 | Criterion | Mechanism | Gate |
@@ -93,3 +116,4 @@ secrets).
 | SC-006 0 allergen recipes on any new path | `recipe_view`→`constraint_guard` choke point | `tests/integration/test_wall_regression.py` |
 | SC-007 agent stays within bounds | iteration + token caps, validated tool inputs | `app/agent/loop.py` + agent-tool eval |
 | P5 no secret/PII in logs or traces | redaction before log + before span | `redaction.leak_count_max: 0` |
+| SC-009 admin endpoints require a valid token | `require_operator` (Vault admin token) | `tests/integration/test_admin.py` |

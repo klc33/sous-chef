@@ -29,6 +29,13 @@ COPY scripts ./scripts
 # (model.joblib is the `make train` output; build the image after training so the served SHA is pinned.)
 COPY prompts ./prompts
 COPY ml/artifacts/model.joblib ./ml/artifacts/model.joblib
+# The operator dashboard's on-demand eval run (POST /admin/evals/run) invokes evals.run_evals IN-PROCESS
+# in this backend (so the dashboard and CI grade identically — no second, drifting code path). That needs
+# the runner, its data files, and the committed thresholds at the repo root the runner resolves
+# (evals/run_evals.py -> parents[1]). Deps it imports (yaml/joblib/sklearn) are already in the backend
+# extra; no torch, no pandas — the bundle stays lean.
+COPY evals ./evals
+COPY eval_thresholds.yaml ./
 RUN uv sync --frozen --no-dev --extra backend
 
 ENV PATH="/srv/.venv/bin:$PATH"

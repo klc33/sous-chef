@@ -1,0 +1,14 @@
+# Per-Dockerfile ignore (BuildKit) for the dashboard image. The dashboard builds from the repo ROOT
+# context (it needs pyproject.toml + uv.lock there), but the root .dockerignore excludes dashboard/ for
+# the backend build. A `<dockerfile>.dockerignore` REPLACES the root .dockerignore for THIS build only,
+# so here we ignore everything and re-include just the lockfile + the dashboard/ package.
+*
+!pyproject.toml
+!uv.lock
+!dashboard/
+
+# Never let caches or secrets in, even from the kept tree.
+**/__pycache__/
+**/*.py[cod]
+.env
+.env.*

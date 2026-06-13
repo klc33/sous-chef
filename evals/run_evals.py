@@ -9,11 +9,15 @@ gate:
     through the deterministic input rail, and the **redaction** leak count over a battery of secrets. These
     are reproducible and are also covered by pytest in `make test`; running them here keeps `make evals` a
     complete, self-contained grade.
-  * **Offline gates** (need a live stack + provider keys + an embedded corpus): **RAG hit@3** on
+  * **Offline gates** (need a live stack + provider keys + an embedded corpus): **RAG hit@3 + MRR** on
     `evals/rag/golden.yaml` and **agent tool-selection** on `evals/agent_tool_selection/cases.yaml`. These
     call the real embeddings/Groq providers, so on an un-provisioned machine they SKIP (not fail) — run
     them after `make up` + `make ingest`. Safety never depends on these scores: the wall and the
     deterministic plan assembly hold regardless of which recipes rank or which tools the model picks.
+  * **Report-only pass** (also offline): **faithfulness + answer-relevancy** scored by a *frozen* Groq
+    judge over the same golden set. The judge is non-deterministic, so these rows are PASS/SKIP only and
+    NEVER set the exit code (per the clarification) — they track retrieval/answer quality over time without
+    flaking the merge gate.
 
 Run with `uv run python -m evals.run_evals` (or `make evals`). Exit code is non-zero iff a gate that
 actually ran scored below its threshold; skipped offline gates do not fail the build.
@@ -35,6 +39,14 @@ _CLASSIFIER_TESTSET = _REPO_ROOT / "evals" / "classifier" / "testset.csv"
 _REDTEAM_ATTEMPTS = _REPO_ROOT / "evals" / "redteam" / "attempts.yaml"
 _RAG_GOLDEN = _REPO_ROOT / "evals" / "rag" / "golden.yaml"
 _AGENT_CASES = _REPO_ROOT / "evals" / "agent_tool_selection" / "cases.yaml"
+
+# Frozen RAG-judge config (report-only faithfulness/answer-relevancy, research R1). The model id is
+# PINNED so scores stay comparable run-to-run ("frozen judge"); reusing the existing Groq adapter means
+# zero new dependencies (FR-030). Bump the pin deliberately, never silently — a changed judge invalidates
+# trend comparisons. The prompt is code, kept in prompts/ (golden rule: prompts are version-controlled).
+_JUDGE_MODEL = "llama-3.3-70b-versatile"
+_JUDGE_PROMPT = _REPO_ROOT / "prompts" / "rag_judge.md"
+_JUDGE_MAX_TOKENS = 200
 
 # Secrets shaped like the real things `core/redaction` must catch — the redaction gate's input battery.
 # Mirrors tests/unit/test_redaction.py so the gate and the unit test agree on what "a leak" means.
@@ -73,14 +85,19 @@ def gate_classifier(thresholds: dict[str, Any]) -> GateResult:
     """
     floor = float(thresholds["classifier"]["f1_min"])
     try:
+        import csv
+
         import joblib
-        import pandas as pd
         from sklearn.metrics import f1_score
 
         model = joblib.load(_REPO_ROOT / "ml" / "artifacts" / "model.joblib")
-        frame = pd.read_csv(_CLASSIFIER_TESTSET)
-        preds = model.predict(frame["text"].tolist())
-        macro_f1 = float(f1_score(frame["label"].tolist(), preds, average="macro"))
+        # Read the held-out set with the stdlib csv reader (not pandas): this gate also runs IN-PROCESS in
+        # the lean backend image (POST /admin/evals/run), which carries scikit-learn + joblib but NOT
+        # pandas (research R8 — no backend runtime dep added). The testset is tiny, so csv is ample.
+        with _CLASSIFIER_TESTSET.open(encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        preds = model.predict([row["text"] for row in rows])
+        macro_f1 = float(f1_score([row["label"] for row in rows], preds, average="macro"))
     except FileNotFoundError as exc:
         # A missing artifact/testset means the model was never trained — that IS a failed grade, not a skip.
         return GateResult("classifier macro-F1", "FAIL", f"missing input ({exc!s})")
@@ -147,19 +164,30 @@ def _open_session() -> tuple[Any, Any, Any] | None:
         return None
 
 
-def gate_rag(thresholds: dict[str, Any]) -> GateResult:
-    """Score RAG hit@3 on the golden set against `rag.hit_at_k_min` (offline — needs corpus + embeddings).
+def gate_rag(thresholds: dict[str, Any]) -> list[GateResult]:
+    """Score RAG hit@3 AND MRR on the golden set (offline — needs corpus + embeddings); two gating rows.
 
-    For each labeled query, runs the real grounded retrieval (`rag.retrieve`, k=3) under a constraint-free
-    default profile and counts a hit when any `ideal` corpus row (matched by source/source_id) appears among
-    the 3 surfaced recipes — hit@3 is exactly what the cook sees (FR-006). SKIPs cleanly when the stack or
-    embeddings provider is unavailable; otherwise FAILs if the achieved hit@3 dips below the floor.
+    Runs the real grounded retrieval (`rag.retrieve`, k from thresholds) once per labeled query under a
+    constraint-free default profile, then derives two deterministic, gating metrics from the SAME ranked
+    result so a single retrieval pass grades both:
+
+      * **hit@k** vs `rag.hit_at_k_min` — counts a hit when any `ideal` corpus row (matched by
+        source/source_id) appears among the k surfaced cards; hit@3 is exactly what the cook sees (FR-006).
+      * **MRR** vs `rag.mrr_min` — mean reciprocal rank of the FIRST ideal among the surfaced cards (0 when
+        none surface). Rewards ranking the right recipe higher, not merely somewhere in the top-k.
+
+    Both are pure functions of the ranking (deterministic), so both gate merges. They SKIP together under
+    the same live-stack guard, so an un-provisioned environment never produces a false failure.
     """
-    floor = float(thresholds["rag"]["hit_at_k_min"])
+    hit_floor = float(thresholds["rag"]["hit_at_k_min"])
+    mrr_floor = float(thresholds["rag"]["mrr_min"])
     k = int(thresholds["rag"]["k"])
     handle = _open_session()
     if handle is None:
-        return GateResult("rag hit@3", "SKIP", "live stack unavailable")
+        return [
+            GateResult("rag hit@3", "SKIP", "live stack unavailable"),
+            GateResult("rag MRR", "SKIP", "live stack unavailable"),
+        ]
     session, connection, engine = handle
     try:
         from app.schemas.recipe import Category
@@ -168,6 +196,7 @@ def gate_rag(thresholds: dict[str, Any]) -> GateResult:
 
         cases = yaml.safe_load(_RAG_GOLDEN.read_text(encoding="utf-8"))["cases"]
         hits = 0
+        rr_total = 0.0
         for case in cases:
             ideal = {(i["source"], str(i["source_id"])) for i in case["ideal"]}
             # Golden uses the human-readable category ("cold drink"); the enum value is underscored.
@@ -176,13 +205,30 @@ def gate_rag(thresholds: dict[str, Any]) -> GateResult:
             rows = rag.retrieve(
                 session, case["query"], ConstraintProfile.default(), category=category, k=k
             )
-            surfaced = {(r.source, str(r.source_id)) for r in rows}
-            hits += int(bool(ideal & surfaced))
-        rate = hits / len(cases) if cases else 1.0
-        status = "PASS" if rate >= floor else "FAIL"
-        return GateResult("rag hit@3", status, f"{rate:.3f} ({hits}/{len(cases)}, floor {floor})")
+            # Keep ranking ORDER (a list, not a set) so MRR can read the position of the first ideal.
+            surfaced = [(r.source, str(r.source_id)) for r in rows]
+            hits += int(any(s in ideal for s in surfaced))
+            rr_total += next(
+                (1.0 / rank for rank, s in enumerate(surfaced, start=1) if s in ideal), 0.0
+            )
+        n = len(cases) or 1
+        hit_rate = hits / n
+        mrr = rr_total / n
+        return [
+            GateResult(
+                "rag hit@3",
+                "PASS" if hit_rate >= hit_floor else "FAIL",
+                f"{hit_rate:.3f} ({hits}/{len(cases)}, floor {hit_floor})",
+            ),
+            GateResult(
+                "rag MRR",
+                "PASS" if mrr >= mrr_floor else "FAIL",
+                f"{mrr:.3f} (floor {mrr_floor})",
+            ),
+        ]
     except Exception as exc:  # noqa: BLE001 — provider/corpus not ready ⇒ skip, never a false failure
-        return GateResult("rag hit@3", "SKIP", f"not runnable ({exc!s})")
+        detail = f"not runnable ({exc!s})"
+        return [GateResult("rag hit@3", "SKIP", detail), GateResult("rag MRR", "SKIP", detail)]
     finally:
         session.close()
         connection.close()
@@ -206,11 +252,11 @@ def _record_tool_calls() -> tuple[set[str], Any]:
         called.add(name)
         return original(name, arguments, ctx)
 
-    tools.dispatch = _spy  # type: ignore[assignment]
+    tools.dispatch = _spy
 
     def _restore() -> None:
         """Reinstate the genuine dispatch function."""
-        tools.dispatch = original  # type: ignore[assignment]
+        tools.dispatch = original
 
     return called, _restore
 
@@ -267,21 +313,154 @@ def gate_agent_tool_selection(thresholds: dict[str, Any]) -> GateResult:
         engine.dispose()
 
 
+# ───────────────────────────── report-only quality pass (frozen judge, never gates) ─────────────────────────────
+
+
+def _judge_context_line(recipe: Any) -> str:
+    """Render one retrieved recipe as grounding context for the judge: title + key ingredients + steps.
+
+    Hands the judge the same real, stored content the reply is supposed to be faithful to (no embeddings,
+    no scores), so a faithfulness score reflects whether the reply's claims trace back to these corpus rows.
+    """
+    ingredients = ", ".join(ing.name for ing in recipe.ingredients[:6]) or "n/a"
+    steps = " ".join(recipe.steps[:4]) if recipe.steps else "n/a"
+    return f"- {recipe.title} (ingredients: {ingredients}; steps: {steps})"
+
+
+def _parse_judge_scores(content: str) -> tuple[float, float]:
+    """Extract (faithfulness, answer_relevancy) from the judge's JSON reply, tolerant of fences/stray prose.
+
+    The judge is told to return a bare JSON object, but models occasionally wrap it in markdown fences or
+    add a sentence; slicing from the first '{' to the last '}' recovers the object without a strict parser.
+    A KeyError/ValueError/JSONDecodeError here propagates to the caller, where the whole report-only pass
+    catches it and SKIPs — a malformed judge reply must never fail the build.
+    """
+    import json
+
+    obj = json.loads(content[content.index("{") : content.rindex("}") + 1])
+    return float(obj["faithfulness"]), float(obj["answer_relevancy"])
+
+
+def gate_judge(thresholds: dict[str, Any]) -> list[GateResult]:
+    """Report-only faithfulness + answer-relevancy via a frozen Groq judge — PASS/SKIP only, NEVER gates.
+
+    For each golden query, runs the real grounded retrieval, builds the cook-facing reply with the same
+    `rag` explainer the app uses, then asks the PINNED `_JUDGE_MODEL` to score the reply on two 0–1 axes
+    from (query, retrieved context, generated reply): faithfulness (is every claim supported by the
+    retrieved recipes?) and answer-relevancy (does the reply address the query?). These are
+    non-deterministic model judgments, so per the clarification (research R1) they are emitted PASS/SKIP
+    only and NEVER set the exit code — they track quality without flaking the merge gate. SKIPs cleanly when
+    the stack/provider is unavailable or the judge returns nothing parseable.
+    """
+    handle = _open_session()
+    if handle is None:
+        return [
+            GateResult("rag faithfulness (report-only)", "SKIP", "live stack unavailable"),
+            GateResult("rag answer-relevancy (report-only)", "SKIP", "live stack unavailable"),
+        ]
+    session, connection, engine = handle
+    try:
+        from app.infra import llm_groq
+        from app.schemas.recipe import Category
+        from app.services.user import rag
+        from app.services.user.constraint_guard import ConstraintProfile
+
+        k = int(thresholds["rag"]["k"])
+        judge_prompt = _JUDGE_PROMPT.read_text(encoding="utf-8")
+        cases = yaml.safe_load(_RAG_GOLDEN.read_text(encoding="utf-8"))["cases"]
+        faith_total = 0.0
+        relevancy_total = 0.0
+        scored = 0
+        for case in cases:
+            raw_category = case.get("category")
+            category = Category(raw_category.replace(" ", "_")) if raw_category else None
+            rows = rag.retrieve(
+                session, case["query"], ConstraintProfile.default(), category=category, k=k
+            )
+            if not rows:  # nothing retrieved ⇒ no reply to judge; skip this case, don't penalize
+                continue
+            context = "\n".join(_judge_context_line(r) for r in rows)
+            reply = rag._explain(case["query"], rows)  # the real grounded reply the cook would see
+            messages = [
+                {"role": "system", "content": judge_prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"QUERY:\n{case['query']}\n\n"
+                        f"RETRIEVED CONTEXT:\n{context}\n\n"
+                        f"REPLY:\n{reply}"
+                    ),
+                },
+            ]
+            response = llm_groq.chat(messages, model=_JUDGE_MODEL, max_tokens=_JUDGE_MAX_TOKENS)
+            faith, relevancy = _parse_judge_scores(response.choices[0].message.content or "")
+            faith_total += faith
+            relevancy_total += relevancy
+            scored += 1
+        if scored == 0:
+            detail = "no cases scored"
+            return [
+                GateResult("rag faithfulness (report-only)", "SKIP", detail),
+                GateResult("rag answer-relevancy (report-only)", "SKIP", detail),
+            ]
+        return [
+            GateResult(
+                "rag faithfulness (report-only)",
+                "PASS",
+                f"{faith_total / scored:.3f} (report-only, {scored} cases)",
+            ),
+            GateResult(
+                "rag answer-relevancy (report-only)",
+                "PASS",
+                f"{relevancy_total / scored:.3f} (report-only, {scored} cases)",
+            ),
+        ]
+    except Exception as exc:  # noqa: BLE001 — non-deterministic judge ⇒ never a build failure; SKIP
+        detail = f"not runnable ({exc!s})"
+        return [
+            GateResult("rag faithfulness (report-only)", "SKIP", detail),
+            GateResult("rag answer-relevancy (report-only)", "SKIP", detail),
+        ]
+    finally:
+        session.close()
+        connection.close()
+        engine.dispose()
+
+
+def thresholds() -> dict[str, Any]:
+    """Public accessor for the committed thresholds (the in-process admin eval endpoint echoes these)."""
+    return _thresholds()
+
+
+def collect_results() -> list[GateResult]:
+    """Run every gate and return the structured results list WITHOUT printing or setting an exit code.
+
+    The shared core of `run()` and the in-process `POST /admin/evals/run`: deterministic gates always run,
+    offline gates SKIP without a live stack, and the report-only judge rows are PASS/SKIP by construction.
+    Returning the raw `GateResult` list lets the admin service serialize it straight to JSON and lets `run()`
+    render the table + derive the exit code, so both surfaces grade identically from one place.
+    """
+    loaded = _thresholds()
+    return [
+        gate_classifier(loaded),
+        gate_redteam(loaded),
+        gate_redaction(loaded),
+        *gate_rag(loaded),
+        gate_agent_tool_selection(loaded),
+        *gate_judge(loaded),
+    ]
+
+
 def run() -> int:
     """Run every gate, print a results table, and return a process exit code (non-zero iff a gate FAILed).
 
-    Deterministic gates (classifier, red-team, redaction) always run; offline gates (RAG, agent) run when a
-    live stack is reachable and SKIP otherwise. Only a FAIL on a gate that actually ran flips the exit code,
-    so an un-provisioned CI step still grades the deterministic safety/quality gates without false failures.
+    Deterministic gates (classifier, red-team, redaction) always run; offline gates (RAG hit@3/MRR, agent,
+    and the report-only judge) run when a live stack is reachable and SKIP otherwise. Only a FAIL on a gate
+    that actually ran flips the exit code — the report-only judge rows are PASS/SKIP by construction and
+    never gate — so an un-provisioned CI step still grades the deterministic safety/quality gates without
+    false failures.
     """
-    thresholds = _thresholds()
-    results = [
-        gate_classifier(thresholds),
-        gate_redteam(thresholds),
-        gate_redaction(thresholds),
-        gate_rag(thresholds),
-        gate_agent_tool_selection(thresholds),
-    ]
+    results = collect_results()
 
     width = max(len(r.name) for r in results)
     print("eval gates (vs eval_thresholds.yaml):\n")
