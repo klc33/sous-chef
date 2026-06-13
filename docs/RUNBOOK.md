@@ -84,6 +84,32 @@ Re-running is safe — every recipe upserts on `(source, source_id)`, so the cor
 duplicates. The run ends with a coverage report (per-category counts, `% allergen_certain`, and the
 surfaceable count for a representative allergic profile).
 
+> **Raise nutrition coverage by swapping in Food.com.** A Food.com RAW_recipes subset is the biggest
+> lever on the "no nutrition" rate (per-line quantities + an authoritative per-serving nutrition column);
+> RecipeNLG is names-only and nutrition-uncomputable. Drop a Food.com CSV at
+> `ingestion/data/kaggle_recipes.csv` (see [`ingestion/data/README.md`](../ingestion/data/README.md)) and
+> re-run `make ingest` for the canonical, source-aware refresh.
+
+### Backfill nutrition on the existing corpus (`scripts/backfill_nutrition.py`)
+
+When the curated USDA fallback (`ingestion/ingredient_nutrition_data.py`) is widened, recipes already in
+the corpus were computed under the old logic and may still read "nutrition not available". The backfill
+recomputes the **approximate** rows in place from each recipe's **stored** ingredients — **offline** (it
+reads the on-disk Open Food Facts cache, no live calls) and **idempotent** (recompute is additive, so a
+recipe's coverage only improves or stays equal). It touches **only** the `nutrition_cache` row and
+**skips authoritative rows** (`is_approximate = false`, e.g. Food.com source nutrition) so exact data is
+never downgraded. Run it on the host against the mapped Postgres port:
+
+```powershell
+$env:POSTGRES_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/souschef"
+uv run python -m scripts.backfill_nutrition    # run 1: reports all-zero before/after + newly fixed
+uv run python -m scripts.backfill_nutrition    # run 2: after-count unchanged (idempotent), exact rows skipped
+```
+
+It prints a before/after all-zero count plus how many rows it recomputed and how many were skipped as
+authoritative. `make ingest` (above) remains the canonical full refresh; the backfill is the cheaper
+in-place pass when only the fallback logic changed.
+
 Corpus sanity — every surfaceable recipe is complete (SC-002), expect **0 rows**:
 
 ```sql

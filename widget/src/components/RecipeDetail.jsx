@@ -4,11 +4,14 @@
 // The component is presentational: it shows the RecipeDetail DTO and reports favorite/close intents upward.
 
 import { labelFor } from "../lib/categories.js";
+import { imageFor, placeholderFor } from "../lib/images.js";
 
 // `recipe` is a RecipeDetail DTO. `onBack()` returns to the previous list. `onToggleFavorite(id)` saves or
 // removes; `recipe.is_favorite` seeds the heart state.
 export default function RecipeDetail({ recipe, onBack, onToggleFavorite }) {
   const n = recipe.nutrition;
+  // Real source photo when present, else the generic category placeholder; `alt` is always the title.
+  const { src, alt } = imageFor(recipe);
   return (
     <section className="detail">
       <div className="detail__top">
@@ -25,6 +28,17 @@ export default function RecipeDetail({ recipe, onBack, onToggleFavorite }) {
           {recipe.is_favorite ? "♥" : "♡"}
         </button>
       </div>
+
+      {/* A failed source-photo load falls back to the category placeholder — same grounding contract as
+          the card: only this recipe's photo or a generic placeholder, never a borrowed one (FR-013/014/015). */}
+      <img
+        className="detail__img"
+        src={src}
+        alt={alt}
+        onError={(e) => {
+          e.currentTarget.src = placeholderFor(recipe.category);
+        }}
+      />
 
       <h2 className="detail__title">{recipe.title}</h2>
       <p className="detail__meta">

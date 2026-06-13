@@ -93,7 +93,14 @@ export default function App() {
   }
 
   // Browse a category: clears any open detail/chat turn and loads the wall-filtered cards.
+  // Clicking the already-active category toggles it off, returning to the welcome empty state.
   async function handleSelectCategory(value) {
+    if (category === value) {
+      setCategory(null);
+      setCards([]);
+      setError(null);
+      return;
+    }
     setCategory(value);
     setShowFavorites(false);
     setDetail(null);

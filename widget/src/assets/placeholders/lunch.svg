@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Lunch placeholder">
+  <rect width="400" height="300" fill="#eef0e6"/>
+  <g fill="none" stroke="#7a9455" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M132 150a68 40 0 0 1 136 0z"/>
+    <path d="M126 150h148"/>
+    <path d="M138 175h124a62 30 0 0 1-124 0z"/>
+  </g>
+  <text x="200" y="252" fill="#8a9f6a" font-family="system-ui, sans-serif" font-size="22" font-weight="600" text-anchor="middle" letter-spacing="2">LUNCH</text>
+</svg>

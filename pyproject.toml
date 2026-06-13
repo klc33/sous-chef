@@ -28,8 +28,8 @@ backend = [
   "opentelemetry-sdk",               # tracing
   "openinference-instrumentation",
   "arize-phoenix-otel",              # exporter to the Phoenix service (NOT the Phoenix server)
-  "presidio-analyzer",               # PII detection (wired in a later phase)
-  "presidio-anonymizer",             # PII redaction (wired in a later phase)
+  "presidio-analyzer",               # PII detection (wired into core/redaction.py in 006)
+  "presidio-anonymizer",             # PII redaction (wired into core/redaction.py in 006)
   # ── 003-intelligent-behavior: serving deps for the turn pipeline (no torch) ──
   "groq>=1.4.0",                     # LLM chat + native tool calling (Groq is chat-only)
   "openai>=2.41.0",                  # OpenAI-compatible embeddings client (separate hosted provider)
@@ -41,6 +41,7 @@ backend = [
   # NeMo Guardrails was dropped from the serving image: it is unused in app/ and pulled a C++ build
   # dependency (annoy) that broke the lean slim image (golden rule #3). Re-add behind a builder stage
   # only if a model-backed rail is ever actually imported.
+  "en-core-web-sm",                  # small spaCy NER model for Presidio PII (12MB — lean-image rule, #3)
 ]
 
 # ── DASHBOARD IMAGE (the Streamlit operator console) ──────────────────────────
@@ -78,6 +79,9 @@ test = ["pytest", "pytest-asyncio", "httpx"]
 
 [tool.uv]
 default-groups = ["dev"]   # local `uv sync` includes dev tools; images pass --no-dev to skip them
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 # ── Tooling ───────────────────────────────────────────────────────────────────
 

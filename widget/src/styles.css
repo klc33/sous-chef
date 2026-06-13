@@ -236,6 +236,17 @@ button[disabled] {
   display: block;
 }
 
+/* Detail hero image — same source-photo-or-category-placeholder contract as the card, sized
+   consistently so a tall source photo and a square placeholder occupy the same frame (FR-013/016). */
+.detail__img {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: #efe6da;
+  margin-bottom: 12px;
+}
+
 .card__body {
   text-align: left;
   background: none;

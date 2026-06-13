@@ -13,11 +13,16 @@ their free APIs and do **not** need any file here.
 
 ### Expected file
 
-- `kaggle_recipes.csv` — a subset of **RecipeNLG** or the **Food.com (RAW_recipes)** dataset.
+- `kaggle_recipes.csv` — a subset of the **Food.com (RAW_recipes)** dataset (**preferred**) or **RecipeNLG**.
 
-Either dataset works; `fetch_kaggle.py` normalizes whichever columns are present into the common
-raw-recipe shape (title, ingredients, steps). Keep the subset modest — the corpus target is roughly a
-few hundred to ~2,000 recipes total across all sources.
+**Prefer Food.com RAW_recipes.** Its ingredient lines carry **per-line quantities** ("2 cloves garlic",
+"1 1/2 cups flour") and it ships an authoritative **per-serving nutrition** column — so its recipes get
+exact macros and scalable quantities (the single biggest lever on the "no nutrition" rate). RecipeNLG
+lists **ingredient names only** (no quantities, no nutrition), so its recipes are
+**nutrition-uncomputable** and can only ever show "not available". Both still load —
+`fetch_kaggle.py` normalizes whichever columns are present into the common raw-recipe shape (title,
+ingredients, steps) — but a Food.com subset is the one that actually raises coverage. Keep the subset
+modest — the corpus target is roughly a few hundred to ~2,000 recipes total across all sources.
 
 **Nutrition**: if the **Food.com** `nutrition` column is present (a per-serving list
 `[calories, total fat PDV, sugar PDV, sodium PDV, protein PDV, saturated fat PDV, carbohydrates PDV]`),

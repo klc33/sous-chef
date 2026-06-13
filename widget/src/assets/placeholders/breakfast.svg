@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Breakfast placeholder">
+  <rect width="400" height="300" fill="#f3ecdc"/>
+  <g fill="none" stroke="#c79a3f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="200" cy="165" rx="70" ry="44"/>
+    <circle cx="200" cy="158" r="24" fill="#c79a3f" stroke="none"/>
+    <path d="M120 102a30 30 0 0 1 60 0M222 102a30 30 0 0 1 60 0"/>
+  </g>
+  <text x="200" y="252" fill="#a98c52" font-family="system-ui, sans-serif" font-size="22" font-weight="600" text-anchor="middle" letter-spacing="2">BREAKFAST</text>
+</svg>

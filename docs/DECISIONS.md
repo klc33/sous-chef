@@ -148,3 +148,33 @@ spreads the provider choice across callers, violates the one-seam goal and P3. (
 `loop.py` change for no behavior gain (noted as future hardening only if a non-compatible third provider
 appears). (c) `LLM_PROVIDER` also switching embeddings — out of scope and risky against the migration-pinned
 `vector(1536)` column; embeddings keep their own provider/key (Decision 7).
+
+# Decisions — 006 Corpus Data Quality
+
+## D10 — Image grounding: a generic per-category placeholder, not a borrowed/stock/AI photo
+
+**Decision.** When a recipe has no source `image_url`, the cook-facing surfaces render one of five
+**committed generic per-category placeholder SVGs** (`hot_drink` / `cold_drink` / `breakfast` / `lunch` /
+`dinner`) — never a stock, borrowed, or AI-generated photo standing in for the dish. The selection is a
+pure client-side helper [widget/src/lib/images.js](../widget/src/lib/images.js) `imageFor(recipe) →
+{ src, alt }`: `src` = `recipe.image_url` else `placeholderFor(recipe.category)`; `alt` = `recipe.title`.
+Both [RecipeCard](../widget/src/components/RecipeCard.jsx) and
+[RecipeDetail](../widget/src/components/RecipeDetail.jsx) wire an `<img onError>` that swaps a failed
+source-photo load to the same category placeholder, so a 404/blocked host degrades to the placeholder
+rather than a broken-image icon.
+
+**Why.** "Ground everything" (P-safety, golden rule #2): a real photo is the dish; a generic category
+icon is honestly generic; a borrowed/stock/AI photo would *assert* a false fact about what the cook will
+cook. The placeholders are **committed static assets** — no runtime image service, no third-party fetch,
+no key, and no schema change (the persisted `recipes.image_url` already carries nullability). Because
+every fixed `Category` has a committed asset, placeholder resolution **can never fail**; that precondition
+is the one thing pinned by a CI test ([tests/unit/test_image_placeholders.py](../tests/unit/test_image_placeholders.py))
+since the widget has no JS unit-test runner (and plan.md adds none — the `imageFor`/`onError` render path
+is verified manually per quickstart §3).
+
+**Alternatives rejected.** (a) A stock/Unsplash or AI-generated photo per recipe — fabricates the dish's
+appearance, violating grounding, and adds a runtime fetch + dependency for no honest gain. (b) A
+server-side image-resolution service / new `placeholder_url` column — needless: selection is deterministic
+from the existing category, so it belongs in the client with zero new infrastructure (P3, P10). (c) Keep
+today's blank `card__img--placeholder` div with `alt=""` — leaves the detail view image-less and gives
+screen readers nothing; naming the recipe in `alt` is strictly more honest and accessible.

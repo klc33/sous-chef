@@ -200,9 +200,10 @@ extended instead).
 **deterministic screen** (curated regex/keyword patterns for jailbreak/role-override — "ignore previous
 instructions", "you are now…", system-prompt-leak — and allergen-override phrasing — "ignore my
 allergy/diet") **before routing**; suspicious turns are refused with a safe message. Allergen-override is
-*also* structurally impossible past the wall (defense in depth). `guardrails/output_rails.py` runs the
-existing **Presidio redaction** (reused from `core/redaction.py`) + a leak check, and **re-asserts the
-wall** on any recipe in the response, before the reply leaves (and before any Phoenix span). NeMo
+*also* structurally impossible past the wall (defense in depth). `guardrails/output_rails.py` runs
+**`core/redaction.py`** (a deterministic secret/token stub at the time of 003; full Presidio PII
+detection was wired later in 006 — see `006-corpus-data-quality/tasks.md` T026) + a leak check, and
+**re-asserts the wall** on any recipe in the response, before the reply leaves (and before any Phoenix span). NeMo
 Guardrails (already a dep) is available as an optional richer config but is **not required** for the gate —
 the deterministic rules + wall already achieve refusal=1.0. **Gate**: `redteam.refusal_rate_min = 1.0`.
 

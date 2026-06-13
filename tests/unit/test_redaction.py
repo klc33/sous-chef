@@ -39,9 +39,39 @@ def test_redact_masks_secret_keyvalue_pairs() -> None:
 
 
 def test_redact_leaves_innocuous_text_untouched() -> None:
-    """Plain text with no secret pattern passes through unchanged (no over-masking)."""
+    """Plain text with no secret/PII pattern passes through unchanged (no over-masking)."""
     line = "the postgres connection is healthy and redis answered the ping"
     assert redact(line) == line
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["alice@example.com", "cook.123+tag@mail.co.uk", "operator_dev@souschef.io"],
+)
+def test_redact_masks_email_addresses(email: str) -> None:
+    """A representative email never survives in cleartext (FR-007; deterministic, model-independent)."""
+    out = redact(f"contact the cook at {email} about the recipe")
+    assert email not in out
+    assert MASK in out
+
+
+@pytest.mark.parametrize(
+    "phone",
+    ["555-123-4567", "(555) 123-4567", "+1 555 123 4567", "+44 20 7946 0958"],
+)
+def test_redact_masks_phone_numbers(phone: str) -> None:
+    """A representative phone number never survives in cleartext (FR-007; deterministic)."""
+    out = redact(f"call me on {phone} tonight")
+    digits = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    assert digits not in out.replace(" ", "").replace("-", "")
+    assert MASK in out
+
+
+def test_redact_masks_email_inside_mapping_value() -> None:
+    """PII hiding in an innocently-named string field is caught via redact_mapping → redact."""
+    out = redact_mapping({"message": "user signed up with bob@example.com"})
+    assert "bob@example.com" not in out["message"]
+    assert MASK in out["message"]
 
 
 def test_redact_returns_non_str_unchanged() -> None:

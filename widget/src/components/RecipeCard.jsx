@@ -5,18 +5,27 @@
 // the full detail; the heart toggles the favorite without opening it.
 
 import { labelFor } from "../lib/categories.js";
+import { imageFor, placeholderFor } from "../lib/images.js";
 
 // `recipe` is a RecipeCard DTO. `onOpen(id)` drills into the detail view. `onToggleFavorite(id)` saves or
 // removes the favorite; `isFavorite` controls the heart's filled/outline state (may be undefined in browse
 // where favorite status isn't loaded — then it shows the neutral "save" affordance).
 export default function RecipeCard({ recipe, onOpen, onToggleFavorite, isFavorite }) {
+  // Real source photo when present, else the generic category placeholder; `alt` is always the title.
+  const { src, alt } = imageFor(recipe);
   return (
     <article className="card">
-      {recipe.image_url ? (
-        <img className="card__img" src={recipe.image_url} alt="" loading="lazy" />
-      ) : (
-        <div className="card__img card__img--placeholder" aria-hidden="true" />
-      )}
+      {/* A failed source-photo load (404/blocked host) swaps to the category placeholder rather than
+          showing a broken-image icon — never a misrepresenting or empty image (FR-013/014/015). */}
+      <img
+        className="card__img"
+        src={src}
+        alt={alt}
+        loading="lazy"
+        onError={(e) => {
+          e.currentTarget.src = placeholderFor(recipe.category);
+        }}
+      />
 
       <button type="button" className="card__body" onClick={() => onOpen(recipe.id)}>
         <h3 className="card__title">{recipe.title}</h3>

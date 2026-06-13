@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Hot drink placeholder">
+  <rect width="400" height="300" fill="#efe6da"/>
+  <g fill="none" stroke="#b08968" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M150 130h90v55a30 30 0 0 1-30 30h-30a30 30 0 0 1-30-30z"/>
+    <path d="M240 140h22a18 18 0 0 1 0 36h-22"/>
+    <path d="M178 108c-6-10 6-16 0-26M205 108c-6-10 6-16 0-26M232 108c-6-10 6-16 0-26"/>
+  </g>
+  <text x="200" y="250" fill="#9c8b76" font-family="system-ui, sans-serif" font-size="22" font-weight="600" text-anchor="middle" letter-spacing="2">HOT DRINK</text>
+</svg>

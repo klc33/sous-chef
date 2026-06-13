@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Dinner placeholder">
+  <rect width="400" height="300" fill="#ece6ef"/>
+  <g fill="none" stroke="#7b6a99" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="200" cy="150" r="58"/>
+    <circle cx="200" cy="150" r="34"/>
+    <path d="M120 104v60M120 104c-9 0-9 30 0 30M300 104v92M300 104c10 4 10 30 0 34"/>
+  </g>
+  <text x="200" y="252" fill="#928399" font-family="system-ui, sans-serif" font-size="22" font-weight="600" text-anchor="middle" letter-spacing="2">DINNER</text>
+</svg>

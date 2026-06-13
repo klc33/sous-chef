@@ -40,8 +40,10 @@ joblib — **no torch in any image**.
 - Runtime (`backend` extra): `groq` (LLM chat + tool calling), `openai` (embeddings via the separate
   hosted provider — Groq is chat-only), `pgvector` (vector column + search), `scikit-learn` + `joblib`
   (serve the classifier), deterministic in-process guardrails (regex rails in `app/guardrails/` — no
-  framework; `nemoguardrails` was dropped as unused + a heavy C++ build dep), Presidio (already wired for
-  redaction), `slowapi` (rate limit), SQLAlchemy/Alembic/`psycopg`.
+  framework; `nemoguardrails` was dropped as unused + a heavy C++ build dep), Presidio (a dep here, but
+  the output rail actually called the deterministic secret/token *stub* in `core/redaction.py`; full
+  Presidio PII detection was wired later, in 006 — see `006-corpus-data-quality/tasks.md` T026),
+  `slowapi` (rate limit), SQLAlchemy/Alembic/`psycopg`.
 - Offline `ingestion` group: `openai` (embed recipes), `httpx`. Offline `ml` group: `scikit-learn`,
   `joblib`, `pandas`. `evals` group: `scikit-learn`, `pandas`, `pytest` (+ `ragas` available if needed).
 
