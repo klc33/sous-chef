@@ -19,7 +19,7 @@ import uuid
 from typing import Any
 
 import pytest
-from app.infra import embeddings, llm_groq
+from app.infra import embeddings, llm
 from app.models.recipe import Ingredient, NutritionCache, Recipe
 from app.services.user import router as router_service
 from app.services.user.router import IntentRoute
@@ -102,7 +102,7 @@ def _stub_providers(monkeypatch: pytest.MonkeyPatch, *, query_slot: int, intent:
     """
     monkeypatch.setattr(embeddings, "embed_query", lambda _text: _one_hot(query_slot))
     monkeypatch.setattr(
-        llm_groq,
+        llm,
         "chat",
         lambda _messages, **_kwargs: _Resp("Here are some real recipes for you."),
     )
@@ -315,7 +315,7 @@ async def test_plan_meals_returns_varied_plan_and_one_shopping_list(
             _final_resp("Here's a varied 3-day dinner plan."),
         ]
     )
-    monkeypatch.setattr(llm_groq, "chat", lambda _messages, **_kwargs: next(responses))
+    monkeypatch.setattr(llm, "chat", lambda _messages, **_kwargs: next(responses))
     monkeypatch.setattr(
         router_service, "route", lambda _message: IntentRoute("plan_meals", 0.99, "agent")
     )

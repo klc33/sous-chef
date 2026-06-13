@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.agent import tools
 from app.agent.tools import ToolContext
 from app.config import get_settings
-from app.infra import llm_groq
+from app.infra import llm
 from app.services.user.constraint_guard import ConstraintProfile
 
 log = structlog.get_logger()
@@ -44,19 +44,21 @@ _CALL_ATTEMPTS = 2
 
 
 def _call_model(messages: list[dict[str, Any]], settings: Any) -> Any | None:
-    """Call Groq with the tool specs for one round, retrying once on failure; None when it can't succeed.
+    """Call the active LLM with the tool specs for one round, retrying once on failure; None on failure.
 
-    Wraps `llm_groq.chat` so a provider/tool-call error no longer dies silently: every failure is logged
+    Wraps `llm.chat` so a provider/tool-call error no longer dies silently: every failure is logged
     (so a reproducible break is visible in operations, not swallowed) and retried once, because a malformed
     tool call from the stochastic model often comes out well-formed on a second try. Returns the response,
     or None after `_CALL_ATTEMPTS` failures — the signal for the loop to stop with the best safe partial.
+    The agent model is resolved per ACTIVE provider via `settings.agent_model` (the 005 seam), so a provider
+    swap never sends one provider's model id to the other.
     """
     for attempt in range(_CALL_ATTEMPTS):
         try:
-            return llm_groq.chat(
+            return llm.chat(
                 messages,
                 tools=tools.TOOL_SPECS,
-                model=settings.groq_agent_model,
+                model=settings.agent_model,
                 max_tokens=_PER_CALL_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 — log + retry once, then end the loop gracefully

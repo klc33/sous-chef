@@ -30,7 +30,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.infra import embeddings, llm_groq
+from app.infra import embeddings, llm
 from app.models.recipe import Recipe
 from app.repo import recipes as repo_recipes
 from app.schemas.recipe import Category, RecipeCard
@@ -186,7 +186,7 @@ def _explain(query: str, recipes: list[Recipe]) -> str:
         },
     ]
     try:
-        response = llm_groq.chat(messages, max_tokens=_REPLY_MAX_TOKENS)
+        response = llm.chat(messages, max_tokens=_REPLY_MAX_TOKENS)
         content = (response.choices[0].message.content or "").strip()
         if content:
             return content

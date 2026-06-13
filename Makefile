@@ -1,12 +1,19 @@
 # SousChef developer shortcuts. Foundation phase targets: up / down / seed (+ lint / test).
 # `make up` is the single command that brings the whole stack to a running state.
-.PHONY: up down seed ingest train lint test evals
+.PHONY: up down seed ingest train lint test evals pgadmin
 
 # Bring up the full stack. Ensures a .env exists (copied from the non-secret .env.example)
-# so a fresh clone needs zero manual edits, then builds and starts all five services.
+# so a fresh clone needs zero manual edits, then builds and starts all services. The `local`
+# profile is activated so the local-only pgAdmin UI (005/US2) comes up alongside the stack; a
+# bare `docker compose up` (no profile) deliberately omits it — the local-only signal.
 up:
 	@test -f .env || cp .env.example .env
-	docker compose up --build
+	docker compose --profile local up --build
+
+# Print the local pgAdmin URL (brought up by `make up`). The `souschef` Postgres server is
+# pre-provisioned (docker/pgadmin/servers.json), so it's connectable on first boot. Local-only.
+pgadmin:
+	@echo "pgAdmin → http://localhost:5050  (login with PGADMIN_DEFAULT_EMAIL / PGADMIN_DEFAULT_PASSWORD from .env)"
 
 # Tear the stack down and remove volumes (a clean slate; `make up` returns to healthy).
 down:
@@ -14,10 +21,12 @@ down:
 
 # Re-seed dev Vault secrets inside the running backend container (idempotent).
 # Pipes the ON-DISK script via stdin (sh -s) so edits take effect without rebuilding the image,
-# and forwards GROQ_API_KEY / EMBEDDINGS_API_KEY from the operator's env into the container so real
-# keys reach Vault (golden rule #4). Unset keys fall back to the script's dev placeholders.
+# and forwards GROQ_API_KEY / EMBEDDINGS_API_KEY / OPENAI_API_KEY from the operator's env into the
+# container so real keys reach Vault (golden rule #4). OPENAI_API_KEY is the chat key for the
+# provider-agnostic seam (005), forwarded the same way so `LLM_PROVIDER=openai` works after a re-seed.
+# Unset keys fall back to the script's dev placeholders.
 seed:
-	docker compose exec -T -e GROQ_API_KEY -e EMBEDDINGS_API_KEY backend sh -s < scripts/seed_vault.sh
+	docker compose exec -T -e GROQ_API_KEY -e EMBEDDINGS_API_KEY -e OPENAI_API_KEY backend sh -s < scripts/seed_vault.sh
 
 # Build the corpus offline: fetch sources → categorize → extract → allergens + nutrition → load.
 # Idempotent and re-runnable; needs the ingestion dependency group (uv sync --group ingestion).

@@ -74,7 +74,7 @@ working option for a demo:
         `VAULT_ADDR=http://${{Vault.RAILWAY_PRIVATE_DOMAIN}}:8200`.
 - [X] Seeding is automatic — the backend's start command runs `scripts/seed_vault.sh` on every boot.
 
-> Production-grade Vault (HCP Vault or a sealed instance with real secrets) is the Phase 5
+> Production-grade Vault (HCP Vault or a sealed instance with real secrets) is the Phase 6
 > follow-up; dev mode is only for getting a green public deploy now.
 
 ---

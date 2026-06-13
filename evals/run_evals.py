@@ -360,7 +360,11 @@ def gate_judge(thresholds: dict[str, Any]) -> list[GateResult]:
         ]
     session, connection, engine = handle
     try:
-        from app.infra import llm_groq
+        # The judge instantiates the Groq adapter DIRECTLY (not the provider-agnostic `llm` facade): it is a
+        # FROZEN judge pinned to `_JUDGE_MODEL` for run-to-run score comparability, so it must stay on Groq
+        # even when the app itself runs on OpenAI (`LLM_PROVIDER=openai`). Routing it through the facade would
+        # send a Groq model id to whatever provider is active and break the pin (005 seam, DECISIONS D9).
+        from app.infra.llm.groq import GroqClient
         from app.schemas.recipe import Category
         from app.services.user import rag
         from app.services.user.constraint_guard import ConstraintProfile
@@ -392,7 +396,7 @@ def gate_judge(thresholds: dict[str, Any]) -> list[GateResult]:
                     ),
                 },
             ]
-            response = llm_groq.chat(messages, model=_JUDGE_MODEL, max_tokens=_JUDGE_MAX_TOKENS)
+            response = GroqClient().chat(messages, model=_JUDGE_MODEL, max_tokens=_JUDGE_MAX_TOKENS)
             faith, relevancy = _parse_judge_scores(response.choices[0].message.content or "")
             faith_total += faith
             relevancy_total += relevancy

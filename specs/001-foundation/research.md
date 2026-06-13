@@ -22,7 +22,7 @@ This document records the technology decisions and the patterns the implementati
 - **Rationale**: Satisfies one-command startup (SC-001) with no manual unseal, while still proving the
   Vault-only-secrets path (P6). Matches the spec clarification.
 - **Alternatives considered**: Production-mode Vault with persisted storage + unseal step (rejected for
-  local: breaks one-command startup; deferred to Phase 5 deployment).
+  local: breaks one-command startup; deferred to Phase 6 deployment).
 
 ## Decision 3 — Tracing via OpenTelemetry/OpenInference → self-hosted Phoenix
 
@@ -81,5 +81,5 @@ This document records the technology decisions and the patterns the implementati
 ## Open follow-ups (non-blocking, later phases)
 
 - Presidio-backed redaction rules (Phase 3, when cook input exists).
-- Production-mode Vault config + seeding on Railway (Phase 5).
+- Production-mode Vault config + seeding on Railway (Phase 6).
 - Phoenix retention/cost dashboards (Phase 4 dashboard).

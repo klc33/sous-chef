@@ -6,8 +6,8 @@ These pin the grounded retrieval contract in isolation (no DB, no network):
   * a no-compliant-match turn returns an honest empty result and never calls the LLM (FR-005/FR-009),
   * the reply is the LLM's text when it answers, and a grounded fallback when it fails.
 
-`search_by_vector`, `embed_query`, and `llm_groq.chat` are monkeypatched so the test exercises rag's own
-logic (pool → wall → top-k → cards → reply), not the providers it depends on.
+`search_by_vector`, `embed_query`, and `llm.chat` (the provider-agnostic seam) are monkeypatched so the
+test exercises rag's own logic (pool → wall → top-k → cards → reply), not the providers it depends on.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def patched_rag(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         state["chat_count"] += 1
         return _fake_chat_response("Here are a couple of grounded ideas.")
 
-    monkeypatch.setattr(rag.llm_groq, "chat", _fake_chat)
+    monkeypatch.setattr(rag.llm, "chat", _fake_chat)
 
     # Freshness is exercised by its own unit tests + the integration flow; here it is neutralised so
     # these tests isolate rag's pool→wall→top-k→cards→reply logic (no DB). No exclusion, no recording,
@@ -144,7 +144,7 @@ def test_reply_falls_back_to_grounded_titles_on_llm_error(
     def _boom(_messages: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("provider down")
 
-    monkeypatch.setattr(rag.llm_groq, "chat", _boom)
+    monkeypatch.setattr(rag.llm, "chat", _boom)
     result = rag.search(None, "thai", ConstraintProfile.default(), "cook-1")
 
     assert "Green Curry" in result.reply and "Pad Thai" in result.reply

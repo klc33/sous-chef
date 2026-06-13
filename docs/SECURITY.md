@@ -8,8 +8,8 @@ and covered by committed gates. Constitution principles cited as `P#`.
 
 The untrusted input is the cook's free-text chat message (and, indirectly, any text a tool surfaces).
 The assets we protect: (1) a cook's declared allergies/diet — surfacing a violating recipe is the worst
-outcome; (2) provider secrets (Groq / embeddings / Vault keys); (3) the assistant's own instructions
-(no system-prompt leak, no role takeover).
+outcome; (2) provider secrets (Groq / **OpenAI** / embeddings / Vault keys); (3) the assistant's own
+instructions (no system-prompt leak, no role takeover).
 
 ## 1. The allergen wall — deterministic, on every path
 
@@ -77,8 +77,12 @@ secrets).
 - **DB**: all recipe access goes through [app/repo/recipes.py](../app/repo/recipes.py) with ORM /
   parameterized queries only; the vector search binds `query_vec` and `exclude_ids` as parameters
   (injection-safe, P3, P6).
-- **Secrets**: Groq + embeddings keys are read from Vault at runtime; `.env.example` holds only the Vault
-  addr/token + service URLs — **no keys in code, `.env`, or any image** (P4). No torch in any image (P3).
+- **Secrets**: Groq + **OpenAI** + embeddings keys are read from Vault at runtime; `.env.example` holds
+  only the Vault addr/token + service URLs — **no keys in code, `.env`, or any image** (P4). No torch in
+  any image (P3). `OPENAI_API_KEY` (the chat key used only when `LLM_PROVIDER=openai`) is resolved through
+  the **exact same** `VaultAdapter` path as `GROQ_API_KEY` — seeded by [scripts/seed_vault.sh](../scripts/seed_vault.sh)
+  (env-forward-or-dev-placeholder), read at startup, dormant while the default `groq` provider is active. See
+  [DECISIONS.md](DECISIONS.md) **D9** for the provider-agnostic seam.
 - **Agent bounds**: the loop is capped in iterations + tokens and every tool input is Pydantic-validated
   (P6, SC-007), so a manipulated turn can't drive unbounded tool use.
 - **Identity**: the cook is a passwordless `X-Profile-ID` header used only for favorites + seen-history;
@@ -107,6 +111,35 @@ from the operator's shell) and read at startup via [app/config.py](../app/config
 - Admin endpoints stay read-only inspection / on-demand eval runs (corpus browse, `evals/run`, metrics);
   the corpus browse goes through `repo/recipes` (parameterized, P3), never raw SQL.
 
+## 6. Operability surface — the LLM seam & pgAdmin (005)
+
+Two operator-facing additions that, by construction, **cannot** weaken the two guarantees above.
+
+**The provider swap never touches safety.** `LLM_PROVIDER` selects only the chat/agent *generation*
+adapter inside [app/infra/llm/](../app/infra/llm/). The deterministic wall
+([constraint_guard](../app/services/user/constraint_guard.py)), the input/output guardrails, and grounding
+are unchanged code on every path regardless of provider — the swap adds no new generation path and removes
+no gate. The facade attaches only **non-secret** span attributes (`llm.provider`, `llm.model`,
+`llm.total_tokens`); redaction still runs over span attributes before export (golden rule #5), so no key
+reaches a log or a Phoenix span under either provider. The [contract test](../tests/contract/test_llm_client.py)
+proves both adapters expose the identical tool-call shape **with no network**, and the wall-regression +
+red-team suites stay green under whichever provider is active (SC-005) — safety is provider-independent and
+proven, not assumed.
+
+**pgAdmin is a local-only convenience, never deployed (P10, FR-015/FR-016).** The `pgadmin` service lives
+under the docker-compose **`local` profile** (activated by `make up`); a bare `docker compose up` omits it,
+and Railway deploys only the backend (`railway.toml`), so it is excluded from production **doubly** —
+structurally and by the profile. Its `PGADMIN_DEFAULT_EMAIL`/`PGADMIN_DEFAULT_PASSWORD` are obvious
+local-only placeholders in `.env.example` — **not** Vault secrets, never logged/traced/deployed. The
+Postgres password pgAdmin connects with is the existing dev default; `servers.json` ships only connection
+*metadata* (host/port/db/user), no password.
+
+**A manual pgAdmin edit cannot bypass the wall (FR-018).** pgAdmin is read-write by design (the spec wants
+inspect **and** repair), but the constraint guard reads `recipes.allergens` **fresh at query time on every
+cook-facing output path** — so an operator's `UPDATE` to that column is filtered on the very next request by
+construction. Verified by the wall-regression suite (which enumerates `/recipes`, `/recipes/{id}`, `/chat`):
+a manual data change can change *which* recipes exist, never whether an unsafe one can surface.
+
 ## Success-criteria coverage
 
 | Criterion | Mechanism | Gate |
@@ -117,3 +150,8 @@ from the operator's shell) and read at startup via [app/config.py](../app/config
 | SC-007 agent stays within bounds | iteration + token caps, validated tool inputs | `app/agent/loop.py` + agent-tool eval |
 | P5 no secret/PII in logs or traces | redaction before log + before span | `redaction.leak_count_max: 0` |
 | SC-009 admin endpoints require a valid token | `require_operator` (Vault admin token) | `tests/integration/test_admin.py` |
+| 005 SC-004 adapters interface-parity, no network | `LLMClient` Protocol + mocked-transport contract test | `tests/contract/test_llm_client.py` |
+| 005 SC-005 safety identical under both providers | swap touches only `app/infra/llm`; wall + rails unchanged | `test_wall_regression.py` + `tests/redteam/test_attempts.py` (provider-agnostic via `llm.chat` monkeypatch) |
+| 005 SC-006 OpenAI key / pgAdmin pw never leak | `OPENAI_API_KEY` in Vault; pgAdmin pw local-only placeholder; redaction before log + span | `redaction.leak_count_max: 0` |
+| 005 SC-008 pgAdmin absent from the deploy | `local` compose profile + backend-only `railway.toml` | `railway.toml` (no `pgadmin` service) |
+| 005 FR-018 manual pgAdmin edit can't bypass the wall | guard reads `recipes.allergens` fresh at query time | `tests/integration/test_wall_regression.py` |

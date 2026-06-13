@@ -13,7 +13,7 @@ dockerfilePath = "Dockerfile"
 #
 # NOTE: seed_vault.sh writes DEV PLACEHOLDER secrets and is idempotent (safe to re-run on each
 # boot). It is here for the dev-Vault demo posture; once a real seeded Vault is provisioned
-# (Phase 5), drop the seed step and let the platform manage secrets.
+# (Phase 6), drop the seed step and let the platform manage secrets.
 startCommand = "sh -c 'alembic upgrade head && sh scripts/seed_vault.sh && uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
 
 # Health-check-gated deploy: Railway polls /health and only promotes the new deployment once it

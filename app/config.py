@@ -8,6 +8,7 @@ services, validated once at startup so misconfiguration fails fast (FR-010).
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,6 +78,31 @@ class Settings(BaseSettings):
     # starving search turns.
     groq_model: str = Field(default="llama-3.1-8b-instant")
     groq_agent_model: str = Field(default="llama-3.3-70b-versatile")
+
+    # ── 005-pgadmin-and-openai: provider-agnostic chat/agent LLM seam ─────────────────────────
+    # Which hosted provider serves chat/agent GENERATION (NOT embeddings — those stay on their own
+    # provider, Decision 7). One config value flips the whole app between Groq (default, current
+    # behavior) and OpenAI with zero call-site changes (FR-002). A `Literal` makes an unknown value a
+    # fail-fast settings-load error rather than a late surprise (FR-005/SC-003). The two OpenAI knobs
+    # mirror the Groq two-model split (workflow `openai_model` vs agent `openai_agent_model`), but both
+    # DEFAULT to `gpt-4o-mini` — it is cheap and tool-calling-capable, so it serves the agent fine; raise
+    # `openai_agent_model` (e.g. `gpt-4o`) only if you want a stronger model on the multi-tool agent path.
+    # Models are pinned non-secret config (Principle V); the OPENAI_API_KEY is a Vault secret, never here.
+    llm_provider: Literal["groq", "openai"] = Field(default="groq")
+    openai_model: str = Field(default="gpt-4o-mini")
+    openai_agent_model: str = Field(default="gpt-4o-mini")
+
+    @property
+    def agent_model(self) -> str:
+        """The stronger 'agent' model id for the ACTIVE provider — the accessor the bounded agent uses.
+
+        The agent always wants the stronger model, but its *id* is provider-specific, so the call site must
+        not name one provider's model (doing so sends e.g. a Groq id to OpenAI → 404 on a swap). Resolving it
+        here keeps `app/agent/loop.py` provider-agnostic: `LLM_PROVIDER=openai` routes the agent to
+        `openai_agent_model`, Groq (default) to `groq_agent_model`. The workflow path needs no equivalent —
+        it passes no model, so each adapter already falls back to its own fast default (`*_model`).
+        """
+        return self.openai_agent_model if self.llm_provider == "openai" else self.groq_agent_model
 
     # Bounded-agent limits — the loop terminates when either is hit (Constitution VI / SC-007).
     agent_max_iterations: int = Field(default=5)

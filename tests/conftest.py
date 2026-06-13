@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from app.api.health import register_health_router
@@ -51,6 +53,76 @@ def build_test_app(*, postgres: bool = True, redis: bool = True, vault: bool = T
     register_error_handlers(app)
     register_health_router(app)
     return app
+
+
+def make_llm_response(
+    content: str | None = None,
+    *,
+    tool_calls: list[Any] | None = None,
+    total_tokens: int = 0,
+) -> Any:
+    """Build a canned OpenAI-style chat response — the shape both real adapters return (005 seam).
+
+    Mirrors the normalized response contract every caller reads: `.choices[0].message.content`,
+    `.choices[0].message.tool_calls`, and `.usage.total_tokens`. Both Groq's and OpenAI's SDKs return
+    this same surface, so a single stand-in stands in for either provider behind the `llm` facade. Built
+    from `SimpleNamespace` so attribute access matches the SDK objects without importing either SDK.
+    """
+    message = SimpleNamespace(content=content, tool_calls=tool_calls)
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message)],
+        usage=SimpleNamespace(total_tokens=total_tokens),
+    )
+
+
+class FakeLLMClient:
+    """A provider-agnostic stand-in for the `llm` seam: `chat(...)` returns a canned response.
+
+    Satisfies the `LLMClient` shape (a `chat(messages, *, tools, max_tokens, model)` method) without any
+    network or SDK, so unit/integration tests can monkeypatch `llm.chat` (or inject this client) and drive
+    the turn pipeline deterministically. The returned response carries the content/tool_calls/total_tokens
+    set at construction; `calls` records each invocation's kwargs so a test can assert what was sent.
+    """
+
+    def __init__(
+        self,
+        content: str | None = "A grounded reply about real recipes.",
+        *,
+        tool_calls: list[Any] | None = None,
+        total_tokens: int = 0,
+    ) -> None:
+        """Capture the canned reply fields every `chat(...)` call will echo back."""
+        self._content = content
+        self._tool_calls = tool_calls
+        self._total_tokens = total_tokens
+        self.calls: list[dict[str, Any]] = []
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        model: str | None = None,
+    ) -> Any:
+        """Record the call and return the canned OpenAI-style response (no network, no SDK)."""
+        self.calls.append(
+            {"messages": messages, "tools": tools, "max_tokens": max_tokens, "model": model}
+        )
+        return make_llm_response(
+            self._content, tool_calls=self._tool_calls, total_tokens=self._total_tokens
+        )
+
+
+@pytest.fixture
+def fake_llm_client() -> FakeLLMClient:
+    """A `FakeLLMClient` whose `chat(...)` returns a canned OpenAI-style response (no network).
+
+    Shared seam stand-in for any test that monkeypatches `app.infra.llm.chat` or injects a client: it
+    avoids each test re-rolling the `choices[0].message` / `usage.total_tokens` shape by hand and keeps
+    them provider-agnostic (the response shape is identical for Groq and OpenAI behind the facade).
+    """
+    return FakeLLMClient()
 
 
 @pytest.fixture

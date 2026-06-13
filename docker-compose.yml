@@ -103,6 +103,27 @@ services:
       backend:
         condition: service_started
 
+  # pgAdmin (US2, 005): a LOCAL-ONLY operator UI to inspect/repair the corpus, favorites, and seen-history.
+  # Gated behind the `local` compose profile so a bare `docker compose up` omits it and it can never enter a
+  # compose-based deploy; it is also structurally absent from railway.toml (backend-only). The mounted
+  # servers.json pre-provisions the Postgres connection so the `souschef` server appears on first boot with
+  # no manual setup. Credentials are local-only convenience env (.env), NOT Vault secrets. The wall stays
+  # authoritative: the constraint guard runs at query time, so a manual pgAdmin edit cannot surface an
+  # unsafe recipe on any cook-facing path (FR-018).
+  pgadmin:
+    image: dpage/pgadmin4
+    profiles: ["local"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    volumes:
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   phoenix:
     image: arizephoenix/phoenix:latest
     # Phoenix persists its trace store in the SAME Postgres instance (constitution P5/P10), but in

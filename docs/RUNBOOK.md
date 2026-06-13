@@ -177,6 +177,59 @@ there after a reload) → type a discovery query (fresh cards) → try "ignore m
 dish" → a calm **RefusalNotice**, no recipe. In **DevTools → Network**, confirm every call hits only
 `VITE_API_BASE` and carries `X-Profile-ID`. (FR-013..023)
 
+## Operability & model flexibility (005)
+
+### Inspect/repair the database with pgAdmin (local-only)
+
+`make up` activates the docker-compose **`local` profile**, which brings up a pgAdmin UI alongside the
+stack (a bare `docker compose up` without the profile deliberately omits it — the local-only signal). It is
+**never** part of the Railway deploy.
+
+```bash
+make up           # brings up the stack + pgAdmin (local profile)
+make pgadmin      # prints the URL: http://localhost:5050
+```
+
+- **Log in** with `PGADMIN_DEFAULT_EMAIL` / `PGADMIN_DEFAULT_PASSWORD` from `.env` (obvious local-only
+  placeholders — **not** Vault secrets, see [SECURITY.md](SECURITY.md) §6).
+- The **`souschef` Postgres server is already present** on first boot (pre-provisioned via
+  [docker/pgadmin/servers.json](../docker/pgadmin/servers.json)) — no manual connection setup. pgAdmin
+  prompts once for the DB password (the dev default `postgres`) and stores it locally.
+- Browse/repair `recipes`, `ingredients`, `favorites`, `seen_history`. A quick allergen-tag check:
+
+  ```sql
+  SELECT id, title, allergens FROM recipes WHERE allergens IS NOT NULL LIMIT 20;
+  ```
+
+> **Safety note:** pgAdmin is read-write by design, but a manual edit **cannot** bypass the allergen wall —
+> the constraint guard re-reads `recipes.allergens` at query time on every cook-facing path, so any change
+> is filtered on the next request (FR-018; [SECURITY.md](SECURITY.md) §6).
+
+### Flip the chat/agent LLM provider (Groq ⇄ OpenAI)
+
+The chat/agent **generation** provider is selectable by one setting — no source change. The default is
+`groq`; `openai` reuses the already-vendored SDK (no new dependency). Embeddings are **not** affected (they
+keep their own provider). See [DECISIONS.md](DECISIONS.md) **D9**.
+
+```bash
+# 1. seed the OpenAI key into Vault (real key forwarded from your shell; same pattern as GROQ_API_KEY)
+export OPENAI_API_KEY=sk-...
+make seed
+
+# 2. select the provider (the ONE change) and restart
+echo "LLM_PROVIDER=openai" >> .env       # optionally also OPENAI_MODEL / OPENAI_AGENT_MODEL
+make up                                   # restart on OpenAI
+```
+
+- Flip back by removing the `LLM_PROVIDER=openai` line (or setting `=groq`) and restarting.
+- **Fail-fast:** an unknown value (e.g. `LLM_PROVIDER=bogus`) fails at startup with a single clear settings
+  error naming `llm_provider` — the service does not boot in a degraded state.
+- **Observability parity:** each `/chat` turn's Phoenix span carries `llm.provider`, `llm.model`, and
+  `llm.total_tokens` identically under both providers (redaction-clean).
+- `make seed` forwards `OPENAI_API_KEY` (alongside `GROQ_API_KEY` / `EMBEDDINGS_API_KEY`) from your shell
+  into Vault via the [seed script](../scripts/seed_vault.sh); without a real key the placeholder boots fine
+  but a real hosted call fails at the provider (the signal to re-seed with the real key).
+
 ## Deploy target (Railway)
 
 The backend deploys to Railway from the repo `Dockerfile`, gated on the `/health` readiness
@@ -202,7 +255,7 @@ and a reachable Vault. **Real secrets live in Vault, never in Railway variables 
 | `REDIS_URL` | Railway Redis connection URL |
 | `PHOENIX_COLLECTOR_ENDPOINT` | Phoenix collector base URL (tracing is best-effort) |
 
-> Production Vault provisioning + seeding (vs. the local `-dev` mode) is a Phase 5 follow-up
+> Production Vault provisioning + seeding (vs. the local `-dev` mode) is a Phase 6 follow-up
 > tracked in `research.md`; until then point `VAULT_ADDR`/`VAULT_TOKEN` at a reachable Vault whose
 > `secret/sous-chef` path is seeded the same way as [`scripts/seed_vault.sh`](../scripts/seed_vault.sh).
 

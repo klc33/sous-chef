@@ -41,8 +41,10 @@ diet + seen-history are pushed into the same `WHERE` clause as cheap exact pre-f
 ## D3 — Embeddings from a separate hosted provider; Groq is chat-only
 
 **Decision.** Embeddings (`text-embedding-3-small`, dim 1536) come from an OpenAI-compatible endpoint
-behind [app/infra/embeddings.py](../app/infra/embeddings.py); Groq serves chat + tool-calling behind
-[app/infra/llm_groq.py](../app/infra/llm_groq.py). Both keys live in Vault (P4).
+behind [app/infra/embeddings.py](../app/infra/embeddings.py); Groq serves chat + tool-calling behind the
+LLM seam [app/infra/llm/](../app/infra/llm/) (the Groq adapter is
+[app/infra/llm/groq.py](../app/infra/llm/groq.py); see **D9** for the provider-agnostic seam that 005
+introduced around it). Both keys live in Vault (P4).
 
 **Why.** Groq is chat-only — it has no embeddings endpoint. Splitting the adapters keeps each external
 dependency mockable in tests (P3, P4) and gives each path its own rate-limit bucket. The two Groq models
@@ -101,3 +103,48 @@ wall** on every recipe before the response leaves and before any Phoenix span.
 **Why.** A deterministic rail makes the red-team gate provable and reproducible (P6) — refusal rate is a
 hard 1.0 gate, not a model's best guess. The output rail re-asserting the wall is defense in depth: a new
 code path that forgets the wall still cannot leak a violating recipe.
+
+# Decisions — 005 Operability & Model Flexibility
+
+## D9 — A provider-agnostic LLM seam: one `Protocol` + a stable facade, swapped by one setting
+
+**Decision.** Replace the single `app/infra/llm_groq.py` module with an `app/infra/llm/` package: a
+`base.LLMClient` [Protocol](../app/infra/llm/base.py), a [groq.py](../app/infra/llm/groq.py) adapter (the
+prior Groq code moved verbatim — lazy `lru_cache` client, Vault `GROQ_API_KEY`, 429-retry/backoff), a new
+[openai.py](../app/infra/llm/openai.py) adapter on the **already-vendored** `openai` SDK, and a
+[factory.py](../app/infra/llm/factory.py) `get_client()` selecting by `settings.llm_provider`. The package
+[`__init__.py`](../app/infra/llm/__init__.py) is the stable module-level **facade** exposing `chat(...)`, so
+the two call sites ([services/user/rag.py](../app/services/user/rag.py),
+[app/agent/loop.py](../app/agent/loop.py)) and the tests change **only their import** (`llm_groq` → `llm`).
+Provider is chosen at startup by `LLM_PROVIDER` (`groq` default | `openai`); an unknown value fails fast at
+settings load via a `Literal` type. Provider keys both come from Vault (`GROQ_API_KEY` / `OPENAI_API_KEY`).
+
+**Why.** The existing `llm_groq.chat(messages, *, tools, max_tokens, model)` signature *was already* the
+desired seam, so `groq.py` is a near-verbatim move and the two callers change one line each (P1, P7). Both
+SDKs are OpenAI-compatible and return the **same response shape** (`choices[0].message.{content,tool_calls}`,
+`usage.total_tokens`) the agent already reads, so the tool-calling contract and token accounting are
+**identical across providers with zero translation** — no custom DTO, no `loop.py` change (Decision 2). A
+`typing.Protocol` (not an ABC) keeps the contract a pure structural check the
+[contract test](../tests/contract/test_llm_client.py) verifies with a mocked transport and **no network**
+(P4, SC-004). Reusing the vendored `openai` SDK adds **no new runtime dependency and no torch** (P10,
+FR-017/SC-009); the OpenAI adapter mirrors Groq's bounded retry so the two behave the same under throttling
+(Decision 4). Safety is **provider-independent by construction**: the swap touches only `app/infra/`, never
+the deterministic wall or guardrails, and the wall-regression + red-team suites prove this under the active
+provider (P-safety, SC-005). Default `groq` preserves current behavior with zero config change (P5).
+
+**Observability (FR-009a / SC-005a).** The facade attaches `llm.provider` / `llm.model` /
+`llm.total_tokens` to the active OpenTelemetry span after each call, wrapped in `contextlib.suppress` so a
+tracing hiccup never breaks a turn. Because the attribution is set at the **single** seam every generation
+flows through, Groq and OpenAI emit identical attributes — parity is by construction, not duplicated code.
+
+**Frozen judge stays Groq-pinned.** The report-only RAG judge in
+[evals/run_evals.py](../evals/run_evals.py) instantiates `GroqClient` **directly** (not the swappable
+facade) against a pinned model id, so its non-deterministic quality scores stay comparable run-to-run even
+when the app itself is running on OpenAI. Same for the documented Groq zero-shot baseline in `ml/`.
+
+**Alternatives rejected.** (a) Keep `llm_groq.py` + add `llm_openai.py` and branch at each call site —
+spreads the provider choice across callers, violates the one-seam goal and P3. (b) A provider-neutral
+`ChatResult` DTO mapping both SDKs — needless for this MVP since both SDKs already agree; would force a
+`loop.py` change for no behavior gain (noted as future hardening only if a non-compatible third provider
+appears). (c) `LLM_PROVIDER` also switching embeddings — out of scope and risky against the migration-pinned
+`vector(1536)` column; embeddings keep their own provider/key (Decision 7).

@@ -78,8 +78,10 @@ the build.
 ### 6. Faithfulness + answer-relevancy — frozen Groq judge, **report-only** (004, offline)
 
 - **Suite**: the same [evals/rag/golden.yaml](../evals/rag/golden.yaml) queries; scored from the tuple
-  (query, retrieved context, generated reply) — no `ragas` dependency, the judge reuses the existing
-  [app.infra.llm_groq](../app/infra/llm_groq.py) adapter with a **pinned judge model id** ([prompts/rag_judge.md](../prompts/rag_judge.md)).
+  (query, retrieved context, generated reply) — no `ragas` dependency, the judge instantiates the Groq
+  adapter [app.infra.llm.groq.GroqClient](../app/infra/llm/groq.py) **directly** (not the provider-agnostic
+  `llm` facade, 005) with a **pinned judge model id** ([prompts/rag_judge.md](../prompts/rag_judge.md)) so
+  its scores stay comparable even when the app runs on OpenAI (see [DECISIONS.md](DECISIONS.md) D9).
 - **Faithfulness** = is the reply grounded in the retrieved context (no invention)? **Answer-relevancy** =
   does the reply actually address the query? Both in [0,1].
 - **Report-only by design** (FR-007, clarification): the judge is **non-deterministic**, so it must never

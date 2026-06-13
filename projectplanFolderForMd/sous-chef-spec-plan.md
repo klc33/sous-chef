@@ -110,14 +110,14 @@ Each stage constrains the next; anything conflicting with the Constitution is re
 Idea
   ↓  (once) /speckit.constitution
   ↓
-For each phase 1..5:
+For each phase 1..6:
   /speckit.specify  → requirements for the phase   (review/edit)
   /speckit.plan     → technical design for the phase (check vs Constitution)
   /speckit.tasks    → ordered tasks                  (small, reviewable)
   /speckit.implement→ build task-by-task; commit specs beside code
   Testing           → make lint && make test && make evals (gates pass)
   ↓
-Deployment (Phase 5) → green main auto-deploys to Railway
+Deployment (Phase 6) → green main auto-deploys to Railway
 ```
 
 ### Common mistakes to avoid
@@ -370,41 +370,7 @@ metrics with Phoenix deep-links); api/admin endpoints (corpus, evals/run, metric
 
 ---
 
-### PHASE 5 — Deployment  → `specs/005-deployment`
-**Objective:** live, reproducible, documented; tagged release.
-**Features:** Railway services (backend, dashboard, Phoenix) + managed Postgres/Redis plugins; Vault seeded
-on boot; green-`main` auto-deploy; docs (DESIGN, DECISIONS, EVALS, SECURITY, RUNBOOK); rehearsed demo on
-the live URL; tag `v0.1.0`.
-**Effort:** ~2 days. **Dependencies:** Phase 4 (CI green).
-
-```
-/speckit.specify
-Ship Sous-Chef to a public URL, reproducibly and documented.
-REQUIREMENTS:
-- The full stack runs on the host platform at a public HTTPS URL; only a green main deploys.
-- All application secrets live in Vault; managed datastore credentials are injected by the platform.
-- The repo comes up from a fresh clone with one command after seeding secrets, per a written runbook.
-- Documentation explains the design, decisions (with numbers), evals, security model, and how to run.
-ACCEPTANCE: the demo scenario runs end-to-end on the live URL; a fresh clone reproduces locally; tag v0.1.0.
-CONSTRAINTS: no Kubernetes/IaC sprawl; reuse the same Postgres for Phoenix; keep within the lean stack.
-```
-```
-/speckit.plan
-RAILWAY: one project, services = backend + dashboard + phoenix (+ static widget host); plugins =
-PostgreSQL (pgvector enabled) + Redis; Vault as its own service seeded on boot (scripts/seed_vault.sh).
-SECRETS SPLIT: Railway variables hold bootstrap only (Vault addr/token + managed DB/Redis URLs); Groq,
-embeddings, and external API keys live in Vault. CD: GitHub integration auto-deploys main; CI gates guard it.
-DOCS (docs/): DESIGN.md, DECISIONS.md (ML-vs-LLM, chunking, agent-vs-workflow — each with a number),
-EVALS.md, SECURITY.md, RUNBOOK.md (compose up, seed Vault, init Phoenix, deploy).
-RELEASE: rehearse the demo on the live URL; tag v0.1.0.
-```
-```
-/speckit.tasks      # then /speckit.implement, then tag v0.1.0
-```
-
----
-
-### PHASE 6 — Operability & Model Flexibility  → `specs/006-pgadmin-and-openai`
+### PHASE 5 — Operability & Model Flexibility  → `specs/005-pgadmin-and-openai`
 **Objective:** make the running system easier to operate and the LLM provider a one-line swap — without
 adding weight or breaking the wall.
 **Features:** a **pgAdmin** service in the local stack for visual DB inspection/repair (local/dev only,
@@ -466,7 +432,7 @@ Vault secret. DEPENDENCIES: none new — `openai>=2.41.0` is already in the back
 PGADMIN (docker-compose.yml): add a `pgadmin` service (dpage/pgadmin4) under a `local`/dev profile,
 depends_on postgres, published on a local port, with PGADMIN_DEFAULT_EMAIL/PASSWORD as local-only
 convenience env in .env.example (NOT Vault, NOT deployed) and a mounted servers.json pre-provisioning the
-Postgres connection. Exclude it from the Railway service set (Phase 5). Add a `make pgadmin` convenience
+Postgres connection. Exclude it from the Railway service set (Phase 6). Add a `make pgadmin` convenience
 note and a RUNBOOK entry. TESTING: a fake `LLMClient` for unit/integration tests; a contract test that
 both real adapters satisfy the Protocol and emit the same tool-call shape (mock transport, no network);
 optionally parametrize the agent tool-selection eval by provider (report-only). DOCS: DECISIONS.md (why a
@@ -475,6 +441,40 @@ Vault; pgAdmin local-only, never exposed in prod), RUNBOOK.md (open pgAdmin; fli
 ```
 ```
 /speckit.tasks      # then /speckit.implement, then: make lint && make test && make evals (all green, both providers)
+```
+
+---
+
+### PHASE 6 — Deployment  → `specs/006-deployment`
+**Objective:** live, reproducible, documented; tagged release.
+**Features:** Railway services (backend, dashboard, Phoenix) + managed Postgres/Redis plugins; Vault seeded
+on boot; green-`main` auto-deploy; docs (DESIGN, DECISIONS, EVALS, SECURITY, RUNBOOK); rehearsed demo on
+the live URL; tag `v0.1.0`.
+**Effort:** ~2 days. **Dependencies:** Phase 4 (CI green); Phase 5 (the pgAdmin/LLM-seam stack it ships).
+
+```
+/speckit.specify
+Ship Sous-Chef to a public URL, reproducibly and documented.
+REQUIREMENTS:
+- The full stack runs on the host platform at a public HTTPS URL; only a green main deploys.
+- All application secrets live in Vault; managed datastore credentials are injected by the platform.
+- The repo comes up from a fresh clone with one command after seeding secrets, per a written runbook.
+- Documentation explains the design, decisions (with numbers), evals, security model, and how to run.
+ACCEPTANCE: the demo scenario runs end-to-end on the live URL; a fresh clone reproduces locally; tag v0.1.0.
+CONSTRAINTS: no Kubernetes/IaC sprawl; reuse the same Postgres for Phoenix; keep within the lean stack.
+```
+```
+/speckit.plan
+RAILWAY: one project, services = backend + dashboard + phoenix (+ static widget host); plugins =
+PostgreSQL (pgvector enabled) + Redis; Vault as its own service seeded on boot (scripts/seed_vault.sh).
+SECRETS SPLIT: Railway variables hold bootstrap only (Vault addr/token + managed DB/Redis URLs); Groq,
+embeddings, and external API keys live in Vault. CD: GitHub integration auto-deploys main; CI gates guard it.
+DOCS (docs/): DESIGN.md, DECISIONS.md (ML-vs-LLM, chunking, agent-vs-workflow — each with a number),
+EVALS.md, SECURITY.md, RUNBOOK.md (compose up, seed Vault, init Phoenix, deploy).
+RELEASE: rehearse the demo on the live URL; tag v0.1.0.
+```
+```
+/speckit.tasks      # then /speckit.implement, then tag v0.1.0
 ```
 
 ---
@@ -626,7 +626,7 @@ Phoenix and via the dashboard.
 | 8 | Build method unspecified | **GitHub SpecKit** drives the lifecycle | Spec-driven development (P9) | Constitution P9 · Section 2 |
 | 9 | Profile implicitly anonymous-only | **Passwordless persistent profile**; real accounts out of scope | Favorites must survive sessions without full auth (P2/P6) | Section 4 (Phase 2) |
 | 10 | **One SpecKit cycle for the whole project** | **One Constitution + one specify→plan→tasks cycle PER PHASE** (Section 4) | The whole-project cycle produced an unreviewable plan/task list and violated P2/P3; phase-by-phase cycles are how SpecKit is meant to be used and keep work reviewable | Section 2 (Execution Model) · Section 4 (entire plan restructured) |
-| 11 | Single LLM provider (Groq); no DB admin UI | **Provider-agnostic LLM seam** (Groq default, OpenAI swappable by one config value) + **pgAdmin** for local DB ops | Avoid single-provider lock-in/outage and enable cost/tool-call A/B at no new dependency (the `openai` SDK is already vendored); give the operator visual DB inspection without raw psql — both behind config and local-only, honoring P1/P7/P10 | Section 4 (new Phase 6) · Architecture · AI Engineering |
+| 11 | Single LLM provider (Groq); no DB admin UI | **Provider-agnostic LLM seam** (Groq default, OpenAI swappable by one config value) + **pgAdmin** for local DB ops | Avoid single-provider lock-in/outage and enable cost/tool-call A/B at no new dependency (the `openai` SDK is already vendored); give the operator visual DB inspection without raw psql — both behind config and local-only, honoring P1/P7/P10 | Section 4 (new Phase 5) · Architecture · AI Engineering |
 
 **Obsolete content removed:** the single project-wide `/speckit.specify` and `/speckit.plan` blocks
 (replaced by per-phase commands); Anthropic LLM; TypeScript frontend; Langfuse tracing; flat service

@@ -59,7 +59,10 @@ def _groq_baseline_macro_f1(texts: list[str], labels: list[str]) -> float | None
     on a provider. This only exists to document the ML-vs-LLM decision in the model card.
     """
     try:
-        from app.infra import llm_groq
+        # This is the documented GROQ zero-shot baseline (DECISIONS D1), so it uses the Groq adapter
+        # directly rather than the provider-agnostic `llm` facade (005 seam) — the baseline is Groq by
+        # definition and must not follow `LLM_PROVIDER`.
+        from app.infra.llm.groq import GroqClient
     except Exception:
         return None
 
@@ -67,7 +70,7 @@ def _groq_baseline_macro_f1(texts: list[str], labels: list[str]) -> float | None
     label_list = ", ".join(_LABELS)
     for text in texts:
         try:
-            resp = llm_groq.chat(
+            resp = GroqClient().chat(
                 messages=[
                     {
                         "role": "system",

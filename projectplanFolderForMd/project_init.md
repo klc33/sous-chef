@@ -175,7 +175,8 @@ agent, using that phase's paste-ready blocks from [sous-chef-spec-plan.md](sous-
   coding, P9). Commit the generated `spec.md`/`plan.md`/`tasks.md` alongside the code.
 
 The phases (full content in §4): **1 Foundation** → **2 Core (data + the wall + favorites)** → **3 AI
-(RAG, classifier/router, agent, guardrails)** → **4 Testing & UI** → **5 Deployment**. Don't start a
+(RAG, classifier/router, agent, guardrails)** → **4 Testing & UI** → **5 Operability & Model Flexibility**
+→ **6 Deployment**. Don't start a
 phase until the previous one's gates are green (Step 9).
 
 ---
@@ -246,7 +247,7 @@ across refreshes.
 
 ---
 
-## Step 11 — Deploy to Railway (Phase 5)
+## Step 11 — Deploy to Railway (Phase 6)
 
 ```powershell
 # Push to GitHub (Railway auto-deploys the main branch)

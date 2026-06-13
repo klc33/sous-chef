@@ -19,7 +19,7 @@ import uuid
 from typing import Any
 
 import pytest
-from app.infra import embeddings, llm_groq
+from app.infra import embeddings, llm
 from app.models.recipe import Ingredient, NutritionCache, Recipe
 from app.services.user import router as router_service
 from app.services.user.router import IntentRoute
@@ -172,7 +172,7 @@ async def test_rag_search_path_never_surfaces_a_violating_recipe(
     # the router is pinned to the find_recipe workflow so the turn exercises the rag path deterministically.
     monkeypatch.setattr(embeddings, "embed_query", lambda _text: [0.1] * _DIM)
     monkeypatch.setattr(
-        llm_groq,
+        llm,
         "chat",
         lambda _messages, **_kwargs: type(
             "R", (), {"choices": [type("C", (), {"message": type("M", (), {"content": "ok"})()})()]}
@@ -230,7 +230,7 @@ async def test_agent_meal_plan_path_never_surfaces_a_violating_recipe(
             _final_resp("Here's your plan."),
         ]
     )
-    monkeypatch.setattr(llm_groq, "chat", lambda _messages, **_kwargs: next(responses))
+    monkeypatch.setattr(llm, "chat", lambda _messages, **_kwargs: next(responses))
     monkeypatch.setattr(
         router_service, "route", lambda _message: IntentRoute("plan_meals", 0.99, "agent")
     )

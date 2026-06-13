@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "souschef",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "souschef",
+      "Username": "postgres",
+      "SSLMode": "prefer",
+      "Comment": "Pre-provisioned local SousChef Postgres (pgvector). DB password is the dev default 'postgres'; pgAdmin prompts once and stores it locally. Local-only — never deployed."
+    }
+  }
+}
