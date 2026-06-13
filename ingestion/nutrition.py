@@ -3,10 +3,11 @@
 Two strategies, picked by `compute`:
   * **Authoritative** — when the source ships its own nutrition (Food.com's per-serving `nutrition`
     column), convert it directly. These totals are exact, so `is_approximate = false`.
-  * **Approximate** — otherwise, map each ingredient's quantity+unit to grams, pull OFF per-100g
-    nutriments (cached), scale, and sum across the recipe. Any ingredient lacking an OFF mapping or a
-    usable quantity is counted as unmapped and `is_approximate` is set True — partial coverage is
-    signalled honestly, never fabricated (research §6).
+  * **Approximate** — otherwise, map each ingredient's quantity+unit to grams, pull per-100g nutriments
+    (OFF cached, falling back to curated USDA averages when OFF can't match), scale, and sum across the
+    recipe. Count units and bare names that OFF misses are recovered from `ingredient_nutrition_data`
+    where possible; anything still unresolved is counted as unmapped. This branch is always
+    `is_approximate = True` — partial coverage is signalled honestly, never fabricated (research §6).
 
 The runtime NEVER calls OFF; it only reads + scales this precomputed row.
 """
@@ -16,6 +17,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.infra.external.openfoodfacts import OpenFoodFacts
+
+from ingestion.ingredient_nutrition_data import (
+    count_unit_grams,
+    item_grams,
+    nutriments_per_100g,
+)
 
 # --- Food.com authoritative nutrition --------------------------------------------------------------
 # Food.com's `nutrition` column is a 7-element list of PER-SERVING values, in this fixed order:
@@ -96,15 +103,34 @@ _UNIT_TO_GRAMS: dict[str, float] = {
 
 
 def _grams(ingredient: dict[str, Any]) -> float | None:
-    """Convert an ingredient's parsed quantity+unit to grams, or None when it cannot be determined."""
+    """Convert an ingredient's parsed quantity+unit to grams, or None when it cannot be determined.
+
+    Tries three resolutions, most specific first: a known weight/volume unit (`_UNIT_TO_GRAMS`), then —
+    for count or unit-less lines that those tables can't handle — an ingredient-specific average item
+    mass ("one egg", "one onion"), and finally a generic per-count-unit mass ("a clove", "a slice").
+    The latter two only kick in where the original logic returned None, so this strictly *widens*
+    coverage; a still-unresolved line returns None and is counted unmapped exactly as before.
+    """
     quantity = ingredient.get("quantity")
+    if quantity is None:
+        return None
     unit = ingredient.get("unit")
-    if quantity is None or unit is None:
-        return None
-    factor = _UNIT_TO_GRAMS.get(unit)
-    if factor is None:
-        return None
-    return float(quantity) * factor
+
+    # 1) Known weight/volume unit — the exact path (unchanged).
+    if unit is not None:
+        factor = _UNIT_TO_GRAMS.get(unit)
+        if factor is not None:
+            return float(quantity) * factor
+
+    # 2) Count / unit-less line: average mass of one whole item of this ingredient.
+    per_item = item_grams(ingredient["name"])
+    # 3) Fall back to a generic per-count-unit mass when the ingredient itself isn't a known whole item.
+    if per_item is None and unit is not None:
+        per_item = count_unit_grams(unit)
+    if per_item is not None:
+        return float(quantity) * per_item
+
+    return None
 
 
 def aggregate(
@@ -113,8 +139,11 @@ def aggregate(
     """Sum scaled OFF nutriments across ingredients into a nutrition_cache-shaped dict.
 
     Returns calories + protein/carbs/fat totals for `basis_servings`, plus `is_approximate` and
-    `unmapped_ingredient_count`. An ingredient is "unmapped" when its grams can't be determined or OFF
-    has no per-100g nutriments for it; any unmapped ingredient makes the whole total approximate.
+    `unmapped_ingredient_count`. This whole branch is an estimate by construction — it sums per-100g
+    OFF/USDA averages over ingredient-to-grams conversions — so `is_approximate` is ALWAYS True here
+    (only the authoritative `from_food_com` path is exact). An ingredient is "unmapped" when its grams
+    can't be determined or neither OFF nor the USDA fallback has per-100g nutriments for it;
+    `unmapped_ingredient_count` reports that partial coverage separately from the approximate flag.
     """
     calories = protein = carbs = fat = 0.0
     unmapped = 0
@@ -122,6 +151,10 @@ def aggregate(
     for ing in ingredients:
         grams = _grams(ing)
         nutriments = off.lookup_ingredient(ing["name"]).get("nutriments", {})
+        # When OFF has nothing for this name, fall back to the curated USDA per-100g averages so a
+        # common ingredient OFF simply can't match no longer counts as unmapped (still approximate).
+        if not nutriments:
+            nutriments = nutriments_per_100g(ing["name"]) or {}
         if grams is None or not nutriments:
             unmapped += 1
             continue
@@ -137,6 +170,6 @@ def aggregate(
         "protein_g": round(protein, 2),
         "carbs_g": round(carbs, 2),
         "fat_g": round(fat, 2),
-        "is_approximate": unmapped > 0,
+        "is_approximate": True,  # aggregation is an estimate even at full coverage (averages, not exact)
         "unmapped_ingredient_count": unmapped,
     }

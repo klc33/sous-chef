@@ -58,3 +58,8 @@ def test_is_approximate_passthrough_true() -> None:
 def test_is_approximate_passthrough_false() -> None:
     """An exact cache stays exact after scaling."""
     assert scale(_cache(is_approximate=False), 4).is_approximate is False
+
+
+def test_unmapped_count_passthrough() -> None:
+    """Unmapped-ingredient count describes coverage, so it carries through scaling unchanged."""
+    assert scale(_cache(unmapped_ingredient_count=3), cook_servings=8).unmapped_ingredient_count == 3

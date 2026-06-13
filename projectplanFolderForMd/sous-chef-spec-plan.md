@@ -110,14 +110,14 @@ Each stage constrains the next; anything conflicting with the Constitution is re
 Idea
   ↓  (once) /speckit.constitution
   ↓
-For each phase 1..6:
+For each phase 1..7:
   /speckit.specify  → requirements for the phase   (review/edit)
   /speckit.plan     → technical design for the phase (check vs Constitution)
   /speckit.tasks    → ordered tasks                  (small, reviewable)
   /speckit.implement→ build task-by-task; commit specs beside code
   Testing           → make lint && make test && make evals (gates pass)
   ↓
-Deployment (Phase 6) → green main auto-deploys to Railway
+Deployment (Phase 7) → green main auto-deploys to Railway
 ```
 
 ### Common mistakes to avoid
@@ -432,7 +432,7 @@ Vault secret. DEPENDENCIES: none new — `openai>=2.41.0` is already in the back
 PGADMIN (docker-compose.yml): add a `pgadmin` service (dpage/pgadmin4) under a `local`/dev profile,
 depends_on postgres, published on a local port, with PGADMIN_DEFAULT_EMAIL/PASSWORD as local-only
 convenience env in .env.example (NOT Vault, NOT deployed) and a mounted servers.json pre-provisioning the
-Postgres connection. Exclude it from the Railway service set (Phase 6). Add a `make pgadmin` convenience
+Postgres connection. Exclude it from the Railway service set (Phase 7). Add a `make pgadmin` convenience
 note and a RUNBOOK entry. TESTING: a fake `LLMClient` for unit/integration tests; a contract test that
 both real adapters satisfy the Protocol and emit the same tool-call shape (mock transport, no network);
 optionally parametrize the agent tool-selection eval by provider (report-only). DOCS: DECISIONS.md (why a
@@ -445,12 +445,145 @@ Vault; pgAdmin local-only, never exposed in prod), RUNBOOK.md (open pgAdmin; fli
 
 ---
 
-### PHASE 6 — Deployment  → `specs/006-deployment`
+### PHASE 6 — Corpus Data Quality (Nutrition & Images)  → `specs/006-nutrition-and-images`
+**Objective:** make every surfaced recipe trustworthy to look at and read — real (or honestly-absent)
+nutrition and a real (or honestly-generic) image — without ever fabricating either.
+**Features:** a curated **USDA nutrition fallback** (per-100g macros + average per-item / per-count-unit
+gram weights) that widens ingestion's approximate aggregation so common ingredients and count units
+("2 cloves garlic", "1 egg") stop collapsing recipes to all-zeros; an **authoritative nutrition
+data-source upgrade** — swap the names-only RecipeNLG Kaggle subset for the **Food.com RAW_recipes**
+dataset (per-ingredient quantities **and** a per-serving nutrition column → exact macros via the existing
+`from_food_com` path); an **honest coverage display** ("estimated from N of M ingredients" vs a true
+"not available"); a **recipe-image fallback** that shows the real source image when present and a
+clearly-generic per-category placeholder otherwise — never a stock/borrowed photo passed off as the dish;
+idempotent re-ingest + a **nutrition backfill script** for the existing corpus.
+**Effort:** ~2 days. **Dependencies:** Phase 2 (ingestion, corpus, nutrition, recipe_view + the wall);
+Phase 4 (the widget that renders cards/detail).
+
+```
+/speckit.specify
+Raise the data quality of Sous-Chef's corpus so no recipe shows a false or broken fact — nutrition or
+image — while never inventing one.
+WHAT:
+- Nutrition coverage: many recipes show "Nutrition data isn't available" because ingestion's approximate
+  aggregation can't map common ingredient names (Open Food Facts misses them) or count units that carry
+  no mass ("2 cloves garlic", "1 egg"), so totals collapse to zero. Add a curated, AUTHORITATIVE fallback
+  (USDA FoodData Central per-100g macros + average per-item / per-count-unit gram weights) consulted only
+  when Open Food Facts has nothing — widening coverage WITHOUT fabricating values and keeping every
+  aggregated total flagged approximate.
+- Authoritative source: the current Kaggle subset (RecipeNLG) lists ingredient NAMES with no quantities,
+  so its recipes are nutrition-uncomputable from ingredients at all. Replace it with the Food.com
+  RAW_recipes dataset, which carries per-line quantities AND a per-serving nutrition column, so those
+  recipes get EXACT nutrition through the existing authoritative path.
+- Honest coverage: when only some ingredients were measured, the detail view and the chat reply say
+  "estimated from N of M ingredients"; only when nothing could be measured do they say nutrition is
+  unavailable. Never show a fabricated or misleading number.
+- Images: many recipes have no image (only TheMealDB/TheCocktailDB ship image URLs; the Kaggle source does
+  not), so cards/detail render empty or broken. Show the recipe's real source image when present;
+  otherwise a neutral, clearly-generic per-category placeholder with descriptive alt text. Never fetch or
+  display a stock/AI/borrowed photo as if it were this specific dish (grounding).
+WHY:
+- Grounding & honesty (golden rule #2, P6): a wrong calorie count or a photo of a different dish is a
+  fabricated fact a cook acts on; an honest "estimated from N of M" or a generic placeholder tells the truth.
+- Trust & usability (P7): a wall of "not available" and missing images makes a real product look broken.
+- Build only what's required (P2/P10): the fix is curated static data + a data-source swap + a UI
+  fallback — no new runtime dependency, no image service, no torch.
+USER STORIES:
+- As a cook, opening a recipe I see real calories/macros, or an honest note that only part of it could be
+  measured, or — only if truly unknown — that nutrition isn't available; I never see a made-up number.
+- As a cook, every card and detail shows a picture: the real dish photo when the source has one, else a
+  tasteful category placeholder — never a broken image and never a photo of some other dish.
+- As the operator, I refresh the corpus (or run a backfill) and watch the "no nutrition" and "no image"
+  rates drop, reproducibly from a clean run.
+FUNCTIONAL REQUIREMENTS:
+- The nutrition fallback is ADDITIVE: it contributes only where Open Food Facts returned nothing, draws
+  every value from an authoritative reference (USDA FDC), leaves aggregated totals flagged is_approximate,
+  and never overrides authoritative source nutrition.
+- Count and unit-less ingredient lines resolve to grams via average per-item / per-count-unit weights for
+  the common cases; genuinely variable units (can/package/piece) stay unmapped and are reported as partial
+  coverage, never guessed.
+- The Food.com RAW_recipes subset ingests through the existing pipeline; recipes carrying its per-serving
+  nutrition column store EXACT nutrition (is_approximate = false) and their quantity-bearing lines parse
+  for scaling.
+- The cook-facing nutrition view distinguishes three states — complete, partial ("estimated from N of M
+  ingredients"), and absent ("not available") — and the chat reply mirrors the partial-coverage note.
+- Every recipe surface renders an image: source image_url when present, else a per-category placeholder;
+  a failed image load falls back to the same placeholder; alt text names the recipe. No path shows a
+  third-party photo as the actual recipe.
+- Ingestion stays idempotent; a backfill script recomputes nutrition for the existing corpus from STORED
+  ingredients (on-disk OFF cache, no live calls) without touching any other field or downgrading
+  authoritative rows.
+ACCEPTANCE:
+- After ingesting the Food.com subset + fallback, the share of complete recipes with usable nutrition
+  rises sharply, and Food.com-sourced recipes show exact (non-approximate) macros.
+- A recipe with some unmappable ingredients shows totals plus "estimated from N of M ingredients"; a
+  recipe with nothing measurable shows "not available"; no recipe shows invented macros.
+- No card or detail shows a broken/empty image; recipes without a source photo show the category
+  placeholder; no displayed image misrepresents a different dish as this recipe.
+- make lint && make test pass (incl. the new fallback/coverage tests); the wall, grounding, redaction,
+  and red-team gates are unchanged and green.
+CONSTRAINTS: no torch and no new runtime dependency (USDA values + placeholders are committed static
+assets; no runtime image/nutrition API); the wall and grounding stay deterministic and untouched;
+nutrition values come only from an authoritative reference, never an LLM or a guess; placeholders must
+read as generic, never as a real photo of the dish; ingestion stays idempotent and offline.
+```
+```
+/speckit.plan
+NUTRITION FALLBACK (ingestion/ingredient_nutrition_data.py): a committed module of curated USDA FoodData
+Central data — NUTRIMENTS_PER_100G (energy + macros, keyed on the parser's normalized ingredient name,
+using the SAME field keys as the Open Food Facts adapter so a fallback drops straight into aggregation),
+ITEM_GRAMS (average mass of one whole item: egg, onion, garlic clove), COUNT_UNIT_GRAMS (stable count
+units clove/slice/pinch/dash/sprig; variable units deliberately omitted). Lookups normalize + try a
+singular/plural fallback, mirroring substitutions_data.py.
+AGGREGATION (ingestion/nutrition.py): _grams() resolves count / unit-less lines via item then count-unit
+weights AFTER the existing weight/volume path (strictly additive — only widens coverage); aggregate()
+falls back to NUTRIMENTS_PER_100G when OFF returns nothing; the aggregation branch is ALWAYS
+is_approximate = true (an estimate by construction) while unmapped_ingredient_count reports partial
+coverage separately. The authoritative from_food_com path is unchanged and still wins via compute().
+DATA SOURCE (ingestion/data + fetch_kaggle): document + switch the Kaggle subset to Food.com RAW_recipes
+(per-line quantities + the 7-element per-serving nutrition column). fetch_kaggle already parses that column
+into the authoritative path, so no code change — the README states Food.com is preferred precisely for
+exact macros + scalable quantities (RecipeNLG is names-only and cannot yield nutrition).
+COVERAGE DTO (app/schemas/recipe.py + services/user/nutrition.scale): NutritionSummary gains
+unmapped_ingredient_count (>= 0, default 0); scale() passes it through verbatim (coverage is invariant
+under rescaling). No migration — nutrition_cache already stores the count. Update
+contracts/recipes.openapi.yaml.
+COVERAGE UI (widget RecipeDetail.jsx + services/user/workflow.py): three states — totals; totals +
+"estimated from N of M ingredients" when unmapped > 0 (M = rendered ingredient count); "nutrition isn't
+available" only when every macro is zero. The chat nutrition reply mirrors the partial note.
+IMAGES (ingestion + widget): ingestion already captures source image_url for TheMealDB/TheCocktailDB
+(Food.com/RecipeNLG have none -> null). Add committed per-category placeholder assets (static SVG in the
+widget) and a small helper that picks image_url or the category placeholder; RecipeCard + RecipeDetail
+render <img> with alt = title and an onError fallback to the placeholder, with consistent sizing. No
+runtime image fetching; no schema change (image_url already nullable). NEVER substitute a third-party /
+stock photo for the actual dish (grounding).
+BACKFILL (scripts/backfill_nutrition.py): an idempotent, offline maintenance pass that loads each complete
+recipe (via repo), recomputes nutrition from its STORED ingredients against the on-disk OFF cache + the new
+fallback, and replaces ONLY the nutrition_cache row through a repo helper — skipping authoritative
+(is_approximate = false) rows so exact data is never downgraded. Reports before/after all-zero counts. Run
+on the host against the mapped Postgres port; a full Food.com re-ingest (make ingest) is the canonical,
+source-aware refresh.
+TESTING: unit tests for the fallback tables + _grams count-unit resolution + aggregate's USDA fallback
+(OFF stub) + the always-approximate flag + scale() passthrough; an assertion that a recipe without
+image_url resolves to a category placeholder. No new eval suites; the existing wall / grounding /
+redaction / red-team gates stay green and unchanged.
+DOCS: DECISIONS.md (curated USDA fallback over a live API; a generic placeholder over a borrowed/stock
+photo = grounding; Food.com RAW_recipes over RecipeNLG = quantities + authoritative nutrition),
+RUNBOOK.md (run the nutrition backfill; refresh the corpus from Food.com), ingestion/data/README.md.
+```
+```
+/speckit.tasks      # then /speckit.implement, then: make lint && make test (fallback + coverage green; wall/grounding/redaction/red-team unchanged)
+```
+
+---
+
+### PHASE 7 — Deployment  → `specs/007-deployment`
 **Objective:** live, reproducible, documented; tagged release.
 **Features:** Railway services (backend, dashboard, Phoenix) + managed Postgres/Redis plugins; Vault seeded
 on boot; green-`main` auto-deploy; docs (DESIGN, DECISIONS, EVALS, SECURITY, RUNBOOK); rehearsed demo on
 the live URL; tag `v0.1.0`.
-**Effort:** ~2 days. **Dependencies:** Phase 4 (CI green); Phase 5 (the pgAdmin/LLM-seam stack it ships).
+**Effort:** ~2 days. **Dependencies:** Phase 4 (CI green); Phase 5 (the pgAdmin/LLM-seam stack it ships);
+Phase 6 (the data-quality corpus it deploys).
 
 ```
 /speckit.specify
@@ -627,6 +760,7 @@ Phoenix and via the dashboard.
 | 9 | Profile implicitly anonymous-only | **Passwordless persistent profile**; real accounts out of scope | Favorites must survive sessions without full auth (P2/P6) | Section 4 (Phase 2) |
 | 10 | **One SpecKit cycle for the whole project** | **One Constitution + one specify→plan→tasks cycle PER PHASE** (Section 4) | The whole-project cycle produced an unreviewable plan/task list and violated P2/P3; phase-by-phase cycles are how SpecKit is meant to be used and keep work reviewable | Section 2 (Execution Model) · Section 4 (entire plan restructured) |
 | 11 | Single LLM provider (Groq); no DB admin UI | **Provider-agnostic LLM seam** (Groq default, OpenAI swappable by one config value) + **pgAdmin** for local DB ops | Avoid single-provider lock-in/outage and enable cost/tool-call A/B at no new dependency (the `openai` SDK is already vendored); give the operator visual DB inspection without raw psql — both behind config and local-only, honoring P1/P7/P10 | Section 4 (new Phase 5) · Architecture · AI Engineering |
+| 12 | Nutrition often "not available" (OFF misses + names-only RecipeNLG); many recipes imageless | **Corpus data-quality phase**: curated USDA nutrition fallback + count-unit gram weights; **Food.com RAW_recipes** (quantities + authoritative per-serving nutrition) replacing RecipeNLG; honest "estimated from N of M ingredients" coverage; a generic per-category **image placeholder** (never a borrowed photo) | All-zero nutrition and broken/missing images made real recipes look fake/broken on demo day; the fix tells the truth without inventing a number or misrepresenting a photo (golden rule #2; P2/P7/P10) | Section 2 (phase count 1..7) · Section 4 (new Phase 6; Deployment renumbered to Phase 7) |
 
 **Obsolete content removed:** the single project-wide `/speckit.specify` and `/speckit.plan` blocks
 (replaced by per-phase commands); Anthropic LLM; TypeScript frontend; Langfuse tracing; flat service

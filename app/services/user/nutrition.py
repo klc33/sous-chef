@@ -17,7 +17,8 @@ def scale(nutrition: NutritionCache, cook_servings: int) -> NutritionSummary:
 
     The factor is `cook_servings / basis_servings`; basis_servings is NOT NULL and >= 1 at ingestion, so
     the division is safe. Numeric columns come back as Decimal, hence the explicit float() coercions.
-    `is_approximate` is passed through verbatim — scaling never makes an approximate number exact.
+    `is_approximate` and `unmapped_ingredient_count` pass through verbatim — they describe coverage, which
+    rescaling never changes (scaling makes neither an approximate number exact nor an unmapped one mapped).
     """
     factor = cook_servings / nutrition.basis_servings
     return NutritionSummary(
@@ -27,4 +28,5 @@ def scale(nutrition: NutritionCache, cook_servings: int) -> NutritionSummary:
         carbs_g=float(nutrition.carbs_g) * factor,
         fat_g=float(nutrition.fat_g) * factor,
         is_approximate=nutrition.is_approximate,
+        unmapped_ingredient_count=nutrition.unmapped_ingredient_count,
     )

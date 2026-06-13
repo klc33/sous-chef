@@ -228,6 +228,41 @@ def iter_embeddable(session: Session) -> list[Recipe]:
     return list(rows)
 
 
+def iter_with_nutrition(session: Session) -> list[Recipe]:
+    """Return every complete recipe with ingredients + nutrition eager-loaded (the nutrition-backfill set).
+
+    The read side of the offline nutrition recompute (`scripts/backfill_nutrition.py`): it needs each
+    recipe's stored ingredients to re-run the aggregation and its existing nutrition row to decide whether
+    to touch it (authoritative rows are left alone). Ordered by ingestion time for a stable, resumable pass.
+    """
+    rows = session.execute(
+        select(Recipe)
+        .where(Recipe.is_complete.is_(True))
+        .options(selectinload(Recipe.ingredients), selectinload(Recipe.nutrition))
+        .order_by(Recipe.ingested_at)
+    ).scalars()
+    return list(rows)
+
+
+def set_nutrition(session: Session, recipe: Recipe, nutrition: dict[str, Any]) -> None:
+    """Replace one recipe's cached nutrition row from a nutrition-shaped dict (the backfill write).
+
+    Reassigning `recipe.nutrition` triggers the delete-orphan cascade on the old row, so this converges
+    on re-runs exactly like `upsert_recipe`. Field shape mirrors that writer intentionally — both build a
+    NutritionCache from the same dict produced by `ingestion.nutrition`. Flushes in the caller's transaction.
+    """
+    recipe.nutrition = NutritionCache(
+        basis_servings=nutrition["basis_servings"],
+        calories=nutrition["calories"],
+        protein_g=nutrition["protein_g"],
+        carbs_g=nutrition["carbs_g"],
+        fat_g=nutrition["fat_g"],
+        is_approximate=nutrition["is_approximate"],
+        unmapped_ingredient_count=nutrition["unmapped_ingredient_count"],
+    )
+    session.flush()
+
+
 def get_by_id(session: Session, recipe_id: uuid.UUID) -> Recipe | None:
     """Fetch one recipe by id with ingredients + nutrition eager-loaded, or None if it does not exist.
 

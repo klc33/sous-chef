@@ -117,10 +117,15 @@ def _nutrition_q(
     servings = profile.default_servings if profile is not None else _DEFAULT_SERVINGS
     n = nutrition_service.scale(recipe.nutrition, servings)
     approx = " (approximate)" if n.is_approximate else ""
+    # Mirror the detail view's honesty: when some ingredients weren't measured, say how many did contribute.
+    coverage = ""
+    if n.unmapped_ingredient_count > 0:
+        mapped = len(recipe.ingredients) - n.unmapped_ingredient_count
+        coverage = f" Estimated from {mapped} of {len(recipe.ingredients)} ingredients."
     reply = (
         f"{recipe.title}, scaled to {servings} serving(s){approx}: "
         f"~{n.calories:.0f} kcal, {n.protein_g:.0f} g protein, "
-        f"{n.carbs_g:.0f} g carbs, {n.fat_g:.0f} g fat."
+        f"{n.carbs_g:.0f} g carbs, {n.fat_g:.0f} g fat.{coverage}"
     )
     return ChatResponse(reply=reply, intent="nutrition_q")
 

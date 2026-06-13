@@ -25,6 +25,13 @@ ingestion uses it directly as **authoritative** nutrition (`is_approximate = fal
 nutrition column (RecipeNLG, TheMealDB, TheCocktailDB) fall back to an Open Food Facts estimate, which is
 flagged `is_approximate = true`. So keep the `nutrition` column in your Food.com subset for exact macros.
 
+When Open Food Facts can't match an ingredient name, or a line uses a count unit with no mass ("2 cloves
+garlic", "1 egg"), ingestion consults a curated **USDA FoodData Central** fallback table
+([`ingestion/ingredient_nutrition_data.py`](../ingredient_nutrition_data.py)) for average per-100g macros
+and per-item weights — so common ingredients no longer collapse a recipe's nutrition to all-zeros. These
+are averages, so any recipe relying on them stays `is_approximate = true`. Extend that table to raise
+coverage; never put fabricated numbers in it (golden rule #2).
+
 ## How to obtain it
 
 1. Download from Kaggle (account required):

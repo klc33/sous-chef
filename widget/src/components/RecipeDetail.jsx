@@ -61,6 +61,14 @@ export default function RecipeDetail({ recipe, onBack, onToggleFavorite }) {
                 Per {n.servings} {n.servings === 1 ? "serving" : "servings"}: {Math.round(n.calories)} kcal ·{" "}
                 {Math.round(n.protein_g)}g protein · {Math.round(n.carbs_g)}g carbs · {Math.round(n.fat_g)}g fat
               </p>
+              {/* Partial coverage: some ingredients couldn't be measured into the totals. Say how many
+                  contributed rather than implying the estimate is complete (golden rule #2 — be honest). */}
+              {n.unmapped_ingredient_count > 0 && (
+                <p className="detail__nutrition--coverage">
+                  Estimated from {recipe.ingredients.length - n.unmapped_ingredient_count} of{" "}
+                  {recipe.ingredients.length} ingredients — the rest couldn’t be measured.
+                </p>
+              )}
             </>
           ) : (
             // All macros zero = nutrition was never computed for this recipe (its ingredient quantities

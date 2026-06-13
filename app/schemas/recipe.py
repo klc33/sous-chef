@@ -32,6 +32,15 @@ class NutritionSummary(BaseModel):
     is_approximate: bool = Field(
         description="True when some ingredients could not be mapped to nutrition."
     )
+    unmapped_ingredient_count: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "How many of the recipe's ingredients could not be measured into the totals. The cook-facing "
+            "view subtracts this from the ingredient count to show honest partial coverage "
+            "('estimated from N of M ingredients')."
+        ),
+    )
 
 
 class RecipeCard(BaseModel):

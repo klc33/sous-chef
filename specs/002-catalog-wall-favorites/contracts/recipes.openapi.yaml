@@ -29,6 +29,7 @@ components:
         carbs_g: { type: number }
         fat_g: { type: number }
         is_approximate: { type: boolean, description: true when some ingredients could not be mapped. }
+        unmapped_ingredient_count: { type: integer, minimum: 0, description: ingredients excluded from the totals; the UI shows coverage as (count - this) of count. }
     RecipeCard:
       type: object
       required: [id, title, category, key_ingredients]
