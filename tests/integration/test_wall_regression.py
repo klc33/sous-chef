@@ -128,7 +128,7 @@ async def _surfaced_ids(client, path: str, ids: list[str]) -> set[str]:
     if path == "GET /recipes":
         resp = await client.get("/recipes", params={"category": "dinner"}, headers=_NUT_COOK)
         assert resp.status_code == 200
-        return {c["id"] for c in resp.json()}
+        return {c["id"] for c in resp.json()["items"]}
     if path == "GET /favorites":
         resp = await client.get("/favorites", headers=_NUT_COOK)
         assert resp.status_code == 200

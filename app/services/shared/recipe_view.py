@@ -84,4 +84,5 @@ def to_detail(
         nutrition=nutrition,
         allergens=list(recipe.allergens),
         is_favorite=is_favorite,
+        image_url=recipe.image_url,
     )

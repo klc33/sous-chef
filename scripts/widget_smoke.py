@@ -55,10 +55,14 @@ with httpx.Client(base_url=BASE, headers=H, timeout=30.0) as c:
     r = c.get("/profile")
     check("GET /profile reflects the save", r.json().get("diet") == "vegetarian", f"got {r.json()}")
 
-    print("\n=== GET /recipes?category=hot_drink (RecipeCard list, wall-filtered for this profile) ===")
+    print("\n=== GET /recipes?category=hot_drink (paged RecipeCard list, wall-filtered for this profile) ===")
     r = c.get("/recipes", params={"category": "hot_drink"})
     check("GET /recipes 200", r.status_code == 200, f"got {r.status_code}")
-    cards = r.json() if r.status_code == 200 else []
+    page = r.json() if r.status_code == 200 else {}
+    check("response is a page envelope {items,total,page,page_size}",
+          not need(page, ["items", "total", "page", "page_size"]),
+          f"missing {need(page, ['items', 'total', 'page', 'page_size'])}")
+    cards = page.get("items", []) if isinstance(page, dict) else []
     check("returns a non-empty card list", isinstance(cards, list) and len(cards) > 0, f"len={len(cards) if isinstance(cards, list) else 'n/a'}")
     card = cards[0] if cards else {}
     check("RecipeCard has {id, title, category, key_ingredients}", not need(card, ["id", "title", "category", "key_ingredients"]),

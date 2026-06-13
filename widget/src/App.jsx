@@ -21,14 +21,20 @@ import MealPlanView from "./components/MealPlanView.jsx";
 import ShoppingList from "./components/ShoppingList.jsx";
 import SubstitutionCard from "./components/SubstitutionCard.jsx";
 
+// Cards per category browse page — mirrors the backend's default page_size so the pager math agrees.
+const PAGE_SIZE = 12;
+
 export default function App() {
   // The cook's constraints (mirrors /profile). Null until the first load resolves.
   const [profile, setProfile] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
 
-  // The active category browse (underscored value) and its returned cards.
+  // The active category browse (underscored value) and its returned cards, plus the pager state: the
+  // 1-based page currently shown and the wall-filtered total across the whole category.
   const [category, setCategory] = useState(null);
   const [cards, setCards] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
   // The last chat turn's response (a ChatResponse), routed to a branch below.
   const [chatTurn, setChatTurn] = useState(null);
@@ -78,13 +84,39 @@ export default function App() {
     })();
   }, []);
 
-  // Persist edited constraints (PUT /profile) and refresh the cached profile.
+  // Persist edited constraints (PUT /profile), refresh the cached profile, then RE-APPLY THE WALL to
+  // everything on screen. The wall is enforced server-side per request, but the widget caches the last
+  // fetch — so without this, a recipe that just became non-compliant (e.g. a bacon dish after switching
+  // to vegetarian) would linger from a pre-change fetch. Re-fetching under the new constraints removes it.
   async function handleSaveProfile(next) {
     setSavingProfile(true);
     setError(null);
     try {
       const saved = await api.putProfile(next);
       setProfile(saved);
+
+      // Favorites are wall-filtered too — a now-violating saved recipe must drop out of the list.
+      const favs = await api.listFavorites();
+      setFavorites(favs);
+      setFavoriteIds(new Set(favs.map((f) => f.id)));
+
+      // A past chat turn's cards were filtered under the OLD constraints; clear it rather than leave a
+      // possibly-forbidden recipe showing (it can't be safely re-filtered without re-issuing the turn).
+      setChatTurn(null);
+
+      // Re-run the active category browse from page 1 (the survivor/page count shifts with constraints).
+      if (category) {
+        await loadCategoryPage(category, 1);
+      }
+
+      // An open detail may now be withheld (404) — re-fetch it and drop it if the wall now hides it.
+      if (detail) {
+        try {
+          setDetail(await api.getRecipe(detail.id));
+        } catch {
+          setDetail(null);
+        }
+      }
     } catch (e) {
       reportError(e);
     } finally {
@@ -92,12 +124,33 @@ export default function App() {
     }
   }
 
-  // Browse a category: clears any open detail/chat turn and loads the wall-filtered cards.
+  // Load one page of a category's wall-filtered cards and sync the pager state. Shared by the chip
+  // select (page 1) and the Prev/Next controls; the backend echoes the page it actually served.
+  async function loadCategoryPage(value, nextPage) {
+    setError(null);
+    setLoading("search");
+    try {
+      const res = await api.listRecipes(value, nextPage, PAGE_SIZE);
+      setCards(res.items);
+      setTotal(res.total);
+      setPage(res.page);
+    } catch (e) {
+      setCards([]);
+      setTotal(0);
+      reportError(e);
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  // Browse a category: clears any open detail/chat turn and loads the first page of wall-filtered cards.
   // Clicking the already-active category toggles it off, returning to the welcome empty state.
   async function handleSelectCategory(value) {
     if (category === value) {
       setCategory(null);
       setCards([]);
+      setTotal(0);
+      setPage(1);
       setError(null);
       return;
     }
@@ -105,16 +158,7 @@ export default function App() {
     setShowFavorites(false);
     setDetail(null);
     setChatTurn(null);
-    setError(null);
-    setLoading("search");
-    try {
-      setCards(await api.listRecipes(value));
-    } catch (e) {
-      setCards([]);
-      reportError(e);
-    } finally {
-      setLoading(null);
-    }
+    await loadCategoryPage(value, 1);
   }
 
   // Open a recipe's full detail (GET /recipes/{id}).
@@ -201,12 +245,48 @@ export default function App() {
       return renderChatTurn(chatTurn);
     }
     if (category) {
-      return renderGrid(cards);
+      return (
+        <>
+          {renderGrid(cards)}
+          {renderPager()}
+        </>
+      );
     }
     return (
       <div className="empty">
         <p>Pick a category or ask for an idea to get started.</p>
       </div>
+    );
+  }
+
+  // Prev/Next controls for the category browse. Hidden when a single page covers everything (or nothing).
+  // Buttons disable at the ends; each click reloads the adjacent page from the backend (the authority on
+  // both content and the page number, since the wall decides how many cards actually exist).
+  function renderPager() {
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    if (totalPages <= 1) return null;
+    return (
+      <nav className="pager" aria-label="Recipe pages">
+        <button
+          type="button"
+          className="pager__btn"
+          disabled={page <= 1}
+          onClick={() => loadCategoryPage(category, page - 1)}
+        >
+          ← Prev
+        </button>
+        <span className="pager__status">
+          Page {page} of {totalPages}
+        </span>
+        <button
+          type="button"
+          className="pager__btn"
+          disabled={page >= totalPages}
+          onClick={() => loadCategoryPage(category, page + 1)}
+        >
+          Next →
+        </button>
+      </nav>
     );
   }
 

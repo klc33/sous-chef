@@ -16,6 +16,7 @@ __all__ = [
     "Allergen",
     "NutritionSummary",
     "RecipeCard",
+    "RecipeCardPage",
     "IngredientView",
     "RecipeDetail",
 ]
@@ -53,6 +54,20 @@ class RecipeCard(BaseModel):
     image_url: str | None = None
 
 
+class RecipeCardPage(BaseModel):
+    """One page of wall-filtered browse cards plus the total, so the widget can render pager controls.
+
+    `total` is the count of cards that survived the wall for the whole category (NOT the raw corpus
+    count), so it agrees with what paging through `items` would yield — the wall runs before paging, and
+    a withheld recipe is never counted. Mirrors the operator CorpusPage shape for a consistent pager.
+    """
+
+    items: list[RecipeCard]
+    total: int = Field(ge=0, description="Wall-filtered card count across the whole category.")
+    page: int = Field(ge=1, description="1-based index of the returned page.")
+    page_size: int = Field(ge=1, description="Maximum cards per page (the requested/clamped size).")
+
+
 class IngredientView(BaseModel):
     """One parsed ingredient line on the detail view; raw_text preserves the original source line."""
 
@@ -76,3 +91,7 @@ class RecipeDetail(BaseModel):
     nutrition: NutritionSummary
     allergens: list[str]
     is_favorite: bool
+    image_url: str | None = Field(
+        default=None,
+        description="The recipe's own source photo, or null — the widget falls back to a placeholder.",
+    )

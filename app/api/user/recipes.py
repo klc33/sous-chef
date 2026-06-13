@@ -22,7 +22,7 @@ from app.models.recipe import Category
 from app.repo import favorites as repo_favorites
 from app.repo import profiles as repo_profiles
 from app.repo import recipes as repo_recipes
-from app.schemas.recipe import RecipeCard, RecipeDetail
+from app.schemas.recipe import RecipeCard, RecipeCardPage, RecipeDetail
 from app.services.shared import recipe_view
 from app.services.user import nutrition as nutrition_service
 from app.services.user.constraint_guard import ConstraintProfile
@@ -36,6 +36,13 @@ DbSession = Annotated[Session, Depends(get_db)]
 # Servings a never-set profile cooks for — mirrors the GET /profile default so detail nutrition scales
 # consistently for an unknown cook.
 _DEFAULT_SERVINGS = 2
+
+# Browse paging bounds. The default is one grid's worth of cards; the clamp keeps a hand-rolled query
+# string sane even though FastAPI's Query constraints already reject out-of-range values with a 422.
+_DEFAULT_PAGE_SIZE = 12
+_MIN_PAGE = 1
+_MIN_PAGE_SIZE = 1
+_MAX_PAGE_SIZE = 50
 
 
 def _parse_category(raw: str | None) -> Category:
@@ -54,24 +61,47 @@ def _parse_category(raw: str | None) -> Category:
         ) from None
 
 
-@router.get("/recipes", response_model=list[RecipeCard])
+def _paginate(cards: list[RecipeCard], *, page: int, page_size: int) -> RecipeCardPage:
+    """Slice an already-wall-filtered card list into one page, with `total` reflecting the full survivors.
+
+    Paging happens AFTER the wall (the cards passed in are the compliant survivors), so `total` is the
+    count the cook could actually reach — a withheld recipe is never paged into view nor counted. `page`/
+    `page_size` are defensively re-clamped here (FastAPI already bounds them) so an out-of-range page
+    degrades to an empty slice with honest metadata rather than an error.
+    """
+    page = max(_MIN_PAGE, page)
+    page_size = max(_MIN_PAGE_SIZE, min(_MAX_PAGE_SIZE, page_size))
+    offset = (page - 1) * page_size
+    return RecipeCardPage(
+        items=cards[offset : offset + page_size],
+        total=len(cards),
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/recipes", response_model=RecipeCardPage)
 def list_recipes(
     profile_id: ProfileId,
     session: DbSession,
     category: Annotated[str | None, Query()] = None,
-) -> list[RecipeCard]:
-    """Return compliant cards for one category, filtered by the wall against the cook's constraints.
+    page: Annotated[int, Query(ge=_MIN_PAGE)] = _MIN_PAGE,
+    page_size: Annotated[int, Query(ge=_MIN_PAGE_SIZE, le=_MAX_PAGE_SIZE)] = _DEFAULT_PAGE_SIZE,
+) -> RecipeCardPage:
+    """Return one page of compliant cards for a category, filtered by the wall against the cook's constraints.
 
     Resolves the ConstraintProfile from the stored profile (default for an unknown cook), fetches the
     complete recipes in the category, and hands them to recipe_view.to_cards — which runs the guard
-    before building any card. The result MAY be empty when nothing satisfies the constraints; that is
-    the honest answer.
+    before building any card. The wall runs over the WHOLE category first, then the survivors are paged,
+    so `total` is accurate and no withheld recipe can be paged into view. The page MAY be empty when
+    nothing satisfies the constraints (or the requested page is past the end); that is the honest answer.
     """
     cat = _parse_category(category)
     profile = repo_profiles.get(session, profile_id)
     cp = ConstraintProfile.from_row(profile) if profile is not None else ConstraintProfile.default()
     recipes = repo_recipes.list_by_category(session, cat.value)
-    return recipe_view.to_cards(recipes, cp)
+    cards = recipe_view.to_cards(recipes, cp)
+    return _paginate(cards, page=page, page_size=page_size)
 
 
 def _parse_recipe_id(raw: str) -> uuid.UUID:

@@ -41,6 +41,19 @@ components:
           type: array
           items: { type: string }
         image_url: { type: string, nullable: true }
+    RecipeCardPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RecipeCard' }
+        total:
+          type: integer
+          minimum: 0
+          description: Wall-filtered card count across the whole category (only survivors are counted).
+        page: { type: integer, minimum: 1, description: 1-based index of the returned page. }
+        page_size: { type: integer, minimum: 1, description: Maximum cards per page (requested/clamped). }
     RecipeDetail:
       type: object
       required: [id, title, category, servings, steps, ingredients, nutrition, allergens, is_favorite]
@@ -70,28 +83,41 @@ components:
           type: array
           items: { type: string }
         is_favorite: { type: boolean }
+        image_url: { type: string, nullable: true, description: The recipe's own source photo, or null (widget falls back to a placeholder). }
 
 paths:
   /recipes:
     get:
-      summary: List real recipe cards in one category, filtered by the wall.
+      summary: List one page of real recipe cards in a category, filtered by the wall.
+      description: >
+        The wall runs over the WHOLE category first, then the compliant survivors are paged, so `total`
+        is the count the cook can actually reach and no withheld recipe is ever paged into view.
       parameters:
         - $ref: '#/components/parameters/ProfileId'
         - name: category
           in: query
           required: true
           schema: { $ref: '#/components/schemas/Category' }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: 1-based page index.
+        - name: page_size
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 12 }
+          description: Cards per page.
       responses:
         '200':
           description: >
-            Compliant cards for the category. MAY be an empty array when no recipe satisfies the cook's
-            constraints — an honest empty result, never a substitute.
+            One page of compliant cards for the category. `items` MAY be empty when no recipe satisfies
+            the cook's constraints (or the page is past the end) — an honest empty result, never a substitute.
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/RecipeCard' }
+              schema: { $ref: '#/components/schemas/RecipeCardPage' }
         '400': { description: Missing/invalid X-Profile-ID or category. }
+        '422': { description: page or page_size out of range. }
   /recipes/{id}:
     get:
       summary: Full stored steps + scaled nutrition for one recipe, subject to the wall.

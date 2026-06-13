@@ -67,10 +67,13 @@ export const api = {
   // should pre-validate against the known option lists so this stays a happy path).
   putProfile: (profile) => request("/profile", { method: "PUT", body: profile }),
 
-  // GET /recipes?category=<underscored> → RecipeCard[]. The wall already filtered the list server-side;
-  // an empty array is the honest "nothing compliant here" answer, not an error.
-  listRecipes: (category) =>
-    request(`/recipes?category=${encodeURIComponent(category)}`),
+  // GET /recipes?category=<underscored>&page=&page_size= → { items: RecipeCard[], total, page, page_size }.
+  // The wall already filtered the list server-side (and `total` counts only survivors), so an empty
+  // `items` is the honest "nothing compliant here" answer, not an error. `page` is 1-based.
+  listRecipes: (category, page = 1, pageSize = 12) =>
+    request(
+      `/recipes?category=${encodeURIComponent(category)}&page=${page}&page_size=${pageSize}`,
+    ),
 
   // GET /recipes/{id} → RecipeDetail (verbatim steps). 404 → "not_found" (no existence leak).
   getRecipe: (id) => request(`/recipes/${encodeURIComponent(id)}`),

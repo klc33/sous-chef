@@ -33,6 +33,7 @@ def _add_recipe(
     ingredient_names: list[str],
     steps: list[str] | None = None,
     nutrition: dict[str, object] | None = None,
+    image_url: str | None = None,
 ) -> uuid.UUID:
     """Insert one complete, surfaceable recipe with its ingredients and return its id.
 
@@ -54,6 +55,7 @@ def _add_recipe(
         is_vegan=True,
         is_pescatarian=True,
         is_complete=True,
+        image_url=image_url,
         ingredients=[
             Ingredient(position=i, name=name, raw_text=name, allergen_tags=[])
             for i, name in enumerate(ingredient_names)
@@ -123,9 +125,12 @@ async def test_nut_cook_sees_only_compliant_cards(make_user_client, seeded) -> N
         resp = await client.get("/recipes", params={"category": "dinner"}, headers=_NUT_COOK)
 
     assert resp.status_code == 200
-    cards = resp.json()
+    body = resp.json()
+    cards = body["items"]
     titles = {c["title"] for c in cards}
     assert titles == {"Veg Stew"}
+    # The pager total counts only wall survivors (the peanut recipe is neither shown nor counted).
+    assert body["total"] == 1
     # Cards carry the title + key ingredients (FR-011).
     (card,) = cards
     assert card["key_ingredients"] == ["carrot", "potato", "onion", "celery"]
@@ -138,7 +143,7 @@ async def test_category_purity(make_user_client, seeded) -> None:
         resp = await client.get("/recipes", params={"category": "dinner"}, headers=_NUT_COOK)
 
     assert resp.status_code == 200
-    cards = resp.json()
+    cards = resp.json()["items"]
     assert cards  # non-empty
     assert all(c["category"] == "dinner" for c in cards)
 
@@ -149,7 +154,7 @@ async def test_open_cook_sees_all_in_category(make_user_client, seeded) -> None:
         resp = await client.get("/recipes", params={"category": "dinner"}, headers=_OPEN_COOK)
 
     assert resp.status_code == 200
-    titles = {c["title"] for c in resp.json()}
+    titles = {c["title"] for c in resp.json()["items"]}
     assert titles == {"Veg Stew", "Peanut Curry"}
 
 
@@ -160,7 +165,61 @@ async def test_all_violating_category_returns_empty(make_user_client, seeded) ->
         resp = await client.get("/recipes", params={"category": "breakfast"}, headers=_NUT_COOK)
 
     assert resp.status_code == 200
-    assert resp.json() == []
+    body = resp.json()
+    assert body["items"] == []
+    assert body["total"] == 0
+
+
+async def test_browse_is_paged(make_user_client, db_session: Session) -> None:
+    """A category with more recipes than one page returns a page plus an honest total; later pages follow.
+
+    Seeds 5 compliant lunch recipes and browses with page_size=2: the first page carries 2 cards with
+    total=5, and walking to the last page returns the remaining 1. Cards never repeat across pages, and a
+    page past the end is an honest empty slice (not an error), so the wall-then-slice order holds.
+    """
+    for i in range(5):
+        _add_recipe(
+            db_session,
+            source_id=f"pg-{i}",
+            title=f"Soup {i}",
+            category="lunch",
+            allergens=[],
+            ingredient_names=["water", "salt"],
+        )
+
+    async with make_user_client() as client:
+        first = await client.get(
+            "/recipes",
+            params={"category": "lunch", "page": 1, "page_size": 2},
+            headers=_OPEN_COOK,
+        )
+        last = await client.get(
+            "/recipes",
+            params={"category": "lunch", "page": 3, "page_size": 2},
+            headers=_OPEN_COOK,
+        )
+        past_end = await client.get(
+            "/recipes",
+            params={"category": "lunch", "page": 4, "page_size": 2},
+            headers=_OPEN_COOK,
+        )
+
+    assert first.status_code == 200
+    first_body = first.json()
+    assert first_body["total"] == 5
+    assert first_body["page"] == 1
+    assert first_body["page_size"] == 2
+    assert len(first_body["items"]) == 2
+
+    last_body = last.json()
+    assert len(last_body["items"]) == 1  # 5 recipes / page_size 2 → 1 left on page 3
+    # No id appears on both the first and last page.
+    assert {c["id"] for c in first_body["items"]}.isdisjoint({c["id"] for c in last_body["items"]})
+
+    # A page beyond the end is an honest empty slice, still reporting the real total.
+    past_body = past_end.json()
+    assert past_body["items"] == []
+    assert past_body["total"] == 5
 
 
 async def test_missing_profile_id_is_rejected(make_user_client, seeded) -> None:
@@ -185,6 +244,7 @@ def seeded_detail(db_session: Session) -> dict[str, uuid.UUID]:
         allergens=[],
         ingredient_names=["lentil", "cumin"],
         steps=["Boil the lentils.", "Stir in cumin.", "Serve warm."],
+        image_url="https://example.test/lentil-bowl.jpg",
         nutrition={
             "basis_servings": 2,
             "calories": 400,
@@ -239,6 +299,8 @@ async def test_open_recipe_renders_verbatim_steps_and_scaled_nutrition(
     assert nut["protein_g"] == 40
     assert nut["is_approximate"] is True  # passthrough, unchanged by scaling
     assert body["is_favorite"] is False
+    # The recipe's own source photo round-trips so the detail view can show it (not just a placeholder).
+    assert body["image_url"] == "https://example.test/lentil-bowl.jpg"
 
 
 async def test_violating_recipe_detail_is_404(make_user_client, seeded_detail) -> None:

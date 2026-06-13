@@ -214,6 +214,33 @@ button[disabled] {
   gap: 16px;
 }
 
+/* ── Category pager ─────────────────────────────────────────────────────────── */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.pager__btn {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 0.9rem;
+}
+
+.pager__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pager__status {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .card {
   position: relative;
   background: var(--surface);
