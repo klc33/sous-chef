@@ -1,0 +1,29 @@
+# Railway config for the `phoenix` service — the OPERATOR-gated tracing UI (T015 / FR-011 / SC-008).
+#
+# Arize Phoenix runs from the upstream `arizephoenix/phoenix` image (set Source = Docker Image in the
+# Railway dashboard, mirroring docker-compose). Like the dashboard it is NOT public: it lives on a
+# separate, UNADVERTISED URL (deployment-topology.md). Two invariants from the contract:
+#   1. Shared Postgres (FR-011): Phoenix persists traces in the SAME managed Postgres as the app, isolated
+#      in the `phoenix` schema (PHOENIX_SQL_DATABASE_SCHEMA=phoenix) so its Alembic table never collides
+#      with the app's alembic_version in `public`. Zero extra datastores are provisioned.
+#   2. Non-blocking (SC-008): a Phoenix/tracing outage must NOT take the cook journey down. The backend
+#      exports spans best-effort and /health never depends on Phoenix, so this service can be down/redeploying
+#      without affecting the public app. (Verified by T040: stop phoenix, /health stays 200.)
+#
+# Point a Railway service at this file via the service's "Config-as-code path" = railway/phoenix.toml.
+#
+# Required service variables (bootstrap/non-secret only):
+#   PHOENIX_SQL_DATABASE_URL     — the managed Postgres URL (reference the Postgres plugin var); same DB as app
+#   PHOENIX_SQL_DATABASE_SCHEMA  — must be `phoenix`
+# The app side sets PHOENIX_COLLECTOR_ENDPOINT to this service's PRIVATE-network origin so spans export here.
+#
+# NOTE: the `phoenix` schema must exist in the managed Postgres before Phoenix boots (locally the compose
+# postgres init script creates it; on Railway the operator creates it once — see docs/RUNBOOK.md).
+
+# No [build] section: runs the upstream `arizephoenix/phoenix` image directly (set in the dashboard).
+
+[deploy]
+# Phoenix serves its UI/collector on its own default port; expose it on the operator URL. No /health gate
+# tied to the cook app — tracing readiness is independent of (and never blocks) the backend.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

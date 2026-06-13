@@ -36,6 +36,11 @@ COPY ml/artifacts/model.joblib ./ml/artifacts/model.joblib
 # extra; no torch, no pandas — the bundle stays lean.
 COPY evals ./evals
 COPY eval_thresholds.yaml ./
+# The committed seed corpus (categorized + embedded recipes + manifest). Production never runs the
+# ingestion pipeline — it loads these files via scripts/load_seed_corpus.py at deploy + in CI + locally,
+# so local == prod data (FR-013). embeddings.npy is a Git LFS object: CI must `git lfs pull` before the
+# build, or this copies the pointer file and the loader fails fast on the dim/count check.
+COPY seeds ./seeds
 RUN uv sync --frozen --no-dev --extra backend
 
 ENV PATH="/srv/.venv/bin:$PATH"

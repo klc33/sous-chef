@@ -42,6 +42,8 @@ backend = [
   # dependency (annoy) that broke the lean slim image (golden rule #3). Re-add behind a builder stage
   # only if a model-backed rail is ever actually imported.
   "en-core-web-sm",                  # small spaCy NER model for Presidio PII (12MB — lean-image rule, #3)
+  # ── 007-ship-public-deploy: seed-corpus scripts read/write embeddings.npy (no torch) ──
+  "numpy>=2.4.6",                    # load_seed_corpus.py runs in the backend image at deploy/CI/local
 ]
 
 # ── DASHBOARD IMAGE (the Streamlit operator console) ──────────────────────────

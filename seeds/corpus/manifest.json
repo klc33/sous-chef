@@ -1,0 +1,7 @@
+{
+  "count": 2224,
+  "dim": 1536,
+  "embedding_model": "text-embedding-3-small",
+  "exported_at": "2026-06-13T17:44:23.973812+00:00",
+  "git_sha": "8bc13ad"
+}

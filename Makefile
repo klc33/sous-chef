@@ -1,6 +1,6 @@
 # SousChef developer shortcuts. Foundation phase targets: up / down / seed (+ lint / test).
 # `make up` is the single command that brings the whole stack to a running state.
-.PHONY: up down seed ingest train lint test evals pgadmin
+.PHONY: up down seed load-seed ingest train lint test evals pgadmin
 
 # Bring up the full stack. Ensures a .env exists (copied from the non-secret .env.example)
 # so a fresh clone needs zero manual edits, then builds and starts all services. The `local`
@@ -28,8 +28,18 @@ down:
 seed:
 	docker compose exec -T -e GROQ_API_KEY -e EMBEDDINGS_API_KEY -e OPENAI_API_KEY backend sh -s < scripts/seed_vault.sh
 
+# Load the committed seed corpus into Postgres inside the running backend container — the local data
+# path (mirrors deploy + CI). Network-free + idempotent on (source, source_id): it upserts the
+# pre-embedded rows from seeds/corpus/ and makes ZERO provider calls, so `make up` → `make seed` →
+# `make load-seed` brings a fresh clone to real retrieval results without running `make ingest`. The
+# corpus ships in the backend image (Dockerfile COPY seeds), so this runs entirely from baked-in files.
+load-seed:
+	docker compose exec -T backend python -m scripts.load_seed_corpus
+
 # Build the corpus offline: fetch sources → categorize → extract → allergens + nutrition → load.
 # Idempotent and re-runnable; needs the ingestion dependency group (uv sync --group ingestion).
+# This is the OPERATOR pipeline that BUILDS the seed (then `export_seed_corpus.py` freezes it); the
+# day-to-day local/CI/prod path is `make load-seed`, which never hits the network.
 ingest:
 	uv run python -m ingestion.run_ingest
 
