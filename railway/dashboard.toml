@@ -1,0 +1,28 @@
+# Railway config for the `dashboard` service — the OPERATOR console (T014 / FR-001a).
+#
+# Streamlit operator UI in its OWN lean image (dashboard/Dockerfile: the `dashboard` extra only — no
+# backend libs, no torch). It is NOT a public surface: it lives on a separate, UNADVERTISED Railway URL
+# and is gated behind streamlit-authenticator cookie login (operator creds read from Vault at runtime).
+# It must never appear on the cook-facing public URL (deployment-topology.md). It reads Vault over HTTP
+# and drives the backend /admin/* API with the Vault-issued admin token; it never touches the DB.
+#
+# Point a Railway service at this file via the service's "Config-as-code path" = railway/dashboard.toml.
+#
+# Required service variables (bootstrap/non-secret only — secrets stay in Vault, secrets-keyspace.md):
+#   VAULT_ADDR, VAULT_TOKEN  — reach the prod Vault on the private network (operator hash / cookie key /
+#                              admin token are fetched from Vault, never set here)
+#   BACKEND_ADMIN_URL        — the backend's PRIVATE-network origin for /admin/* calls
+#   OPERATOR_USERNAME        — non-secret login name
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "dashboard/Dockerfile"
+
+[deploy]
+# Mirror the dashboard Dockerfile CMD but bind to the Railway-injected $PORT (the image defaults to 8501;
+# overriding --server.port keeps it correct if Railway assigns a different port). Headless disables the
+# "open a browser" prompt. Secrets (operator hash, cookie key, admin token) are read from Vault at runtime.
+startCommand = "streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true"
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

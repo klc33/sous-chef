@@ -228,6 +228,25 @@ def iter_embeddable(session: Session) -> list[Recipe]:
     return list(rows)
 
 
+def iter_complete_embedded(session: Session) -> list[Recipe]:
+    """Return every complete + embedded recipe with children eager-loaded, deterministically ordered.
+
+    The read side of the seed-corpus export (`scripts/export_seed_corpus.py`): exactly the rows that can
+    surface (complete) AND carry a vector (embedded), which is the curation the committed corpus needs — an
+    incomplete or unembedded row never reaches the cook, so it has no place in the seed. Ordered by
+    (source, source_id) so the export is byte-stable given the same DB (the contract's determinism
+    guarantee) and the `embeddings.npy` rows stay aligned to `recipes.jsonl` line-for-line. Ingredients +
+    nutrition are eager-loaded because each exported row carries them verbatim for a faithful re-upsert.
+    """
+    rows = session.execute(
+        select(Recipe)
+        .where(Recipe.is_complete.is_(True), Recipe.embedding.isnot(None))
+        .options(selectinload(Recipe.ingredients), selectinload(Recipe.nutrition))
+        .order_by(Recipe.source, Recipe.source_id)
+    ).scalars()
+    return list(rows)
+
+
 def iter_with_nutrition(session: Session) -> list[Recipe]:
     """Return every complete recipe with ingredients + nutrition eager-loaded (the nutrition-backfill set).
 

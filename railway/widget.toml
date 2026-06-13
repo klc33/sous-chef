@@ -1,0 +1,29 @@
+# Railway config for the `widget` service — the PUBLIC cook-facing SPA (T012 / FR-001).
+#
+# The React bundle is built by Vite and served static by nginx (widget/Dockerfile, two-stage:
+# node build → nginx serve). This is one of only TWO public surfaces (widget + backend API);
+# everything else is operator-gated (deployment-topology.md).
+#
+# Point a Railway service at this file via the service's "Config-as-code path" = railway/widget.toml,
+# with Root Directory = `widget` so the build context is the widget/ tree (matches docker-compose's
+# `context: ./widget`).
+#
+# ── Build-time origin (the critical wiring) ──────────────────────────────────────────────────────
+# VITE_API_BASE is baked into the bundle at BUILD time (Vite inlines import.meta.env.* — it is NOT a
+# runtime env var), so it must be set as a BUILD ARG/variable on this service equal to the PUBLIC
+# backend origin (e.g. https://<backend>.up.railway.app), NOT a private-network hostname — the SPA runs
+# in the cook's browser. That same public origin must also appear in the backend's WIDGET_ORIGINS so
+# CORS allows the browser calls (T013). Railway serves this over HTTPS with a provisioned certificate.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+# NOTE: VITE_API_BASE is supplied as a build-time variable on the service (Railway exposes service
+# variables to the Docker build), consumed by `ARG VITE_API_BASE` in widget/Dockerfile.
+
+[deploy]
+# nginx serves the static bundle on port 80 (fixed in widget/Dockerfile's conf, matching compose's
+# `5173:80`). Set this service's target port = 80 in the Railway dashboard so the public HTTPS edge
+# routes to it. No app-level health path — nginx serving index.html is the readiness signal.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

@@ -1,0 +1,36 @@
+# Railway config for the `vault` service — HashiCorp Vault in PRODUCTION posture (T010 / FR-005 / FR-006).
+#
+# This is NOT the local `-dev` Vault (in-memory, auto-unsealed, fixed root token). In prod Vault runs in
+# real SERVER mode against a config file, persists to a mounted volume, and is reachable ONLY on Railway's
+# private network — it has no public ingress (deployment-topology.md). The live backend depends on it: app
+# secrets (GROQ/EMBEDDINGS/OPENAI keys, operator-auth secrets) live ONLY here, seeded once by the operator
+# per the RUNBOOK (T016); Railway variables never hold those values (secrets-keyspace.md R1/R4).
+#
+# Point a Railway service at this file via the service's "Config-as-code path" = railway/vault.toml.
+#
+# ── Two volume/config steps that MUST be done in the Railway dashboard (not expressible in this TOML) ──
+#   1. Attach a PERSISTENT VOLUME mounted at /vault/data so the seal/unseal state + KV data survive
+#      restarts and redeploys (a -dev Vault would lose every secret on restart — unacceptable in prod).
+#   2. Provide the server config file the start command reads (mount /vault/config/vault.hcl), e.g.:
+#         storage "file"   { path = "/vault/data" }
+#         listener "tcp"   { address = "0.0.0.0:8200"  tls_disable = true }   # TLS terminates at Railway's edge; private network only
+#         api_addr = "http://0.0.0.0:8200"
+#         ui = true
+#      After first boot the operator runs `vault operator init` + `vault operator unseal` ONCE, then seeds
+#      secrets (scripts/seed_vault.sh against the prod VAULT_ADDR). See docs/RUNBOOK.md.
+
+# No [build] section: this service runs the upstream `hashicorp/vault` image directly (set the service
+# Source = Docker Image `hashicorp/vault` in the Railway dashboard, mirroring docker-compose's image).
+# There is nothing to build from the repo, so only [deploy] applies.
+
+[deploy]
+# Real server mode against the mounted HCL config (contrast docker-compose's `server -dev`). IPC_LOCK
+# (mlock) is granted by Railway's runtime; the file storage backend persists on the attached volume.
+startCommand = "vault server -config=/vault/config/vault.hcl"
+
+# No HTTP health gate here: a freshly initialized Vault reports 501 (uninitialized) / 503 (sealed) on
+# /v1/sys/health until the operator unseals it, so a /health gate would wedge the very first deploy.
+# Vault readiness is verified out-of-band by the operator during the one-time init/unseal (RUNBOOK).
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

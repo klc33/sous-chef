@@ -1,20 +1,23 @@
-# Railway deploy config for the SousChef backend (US4 / FR-008 / SC-005).
-# Build from the repo Dockerfile, start uvicorn, and gate the deploy on the /health readiness
-# endpoint so a new release only goes live once its critical dependencies are reachable.
+# Railway deploy config for the SousChef BACKEND service (T011 / FR-002 / FR-008 / SC-001).
+# One service among several — the rest live under railway/ (widget, dashboard, phoenix, vault); the
+# managed PostgreSQL (pgvector) + Redis plugins are added in the Railway dashboard. Build from the repo
+# Dockerfile, run the migration, then serve uvicorn, gated on /health so a new release only goes live
+# once Postgres + Redis + Vault are all reachable.
 
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# Mirror docker-compose's backend command so a Railway deploy is self-sufficient: apply the DB
-# migration (vector extension + schema), seed the dev Vault, then serve. Without the first two
-# steps the app fails fast at startup (unmigrated DB / unseeded Vault). $PORT is injected by Railway.
-#
-# NOTE: seed_vault.sh writes DEV PLACEHOLDER secrets and is idempotent (safe to re-run on each
-# boot). It is here for the dev-Vault demo posture; once a real seeded Vault is provisioned
-# (Phase 6), drop the seed step and let the platform manage secrets.
-startCommand = "sh -c 'alembic upgrade head && sh scripts/seed_vault.sh && uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
+# PROD start command: migrate → serve. Unlike docker-compose (and unlike this file's earlier dev posture),
+# there is NO boot-seed step: the production Vault is a persistent, server-mode service (railway/vault.toml)
+# seeded ONCE by the operator with real keys (scripts/seed_vault.sh against the prod VAULT_ADDR, T016) —
+# its secrets survive restarts on the mounted volume, so re-seeding placeholders on every boot would be
+# both wrong (clobbers real keys) and a secrets-in-pipeline smell. The seed corpus is likewise already
+# present on the persistent Postgres after the first-deploy load (load_seed_corpus.py, T016), so prod boot
+# is just: apply migrations (vector extension + schema) → serve. The app fails fast at startup if the DB
+# is unmigrated or Vault is unseeded/missing a required secret (FR-014). $PORT is injected by Railway.
+startCommand = "sh -c 'alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
 
 # Health-check-gated deploy: Railway polls /health and only promotes the new deployment once it
 # returns 200 (all of Postgres/Redis/Vault reachable). A 503 holds the rollout — no false-healthy.

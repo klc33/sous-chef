@@ -83,7 +83,7 @@ injection/jailbreak probes must all be refused) and the **redaction** test. Then
 the running stack (`make up`).
 
 <!-- SPECKIT START -->
-Active feature: **006-corpus-data-quality**. For technologies, project structure, shell commands,
-and other context for the current work, read the plan at `specs/006-corpus-data-quality/plan.md`
+Active feature: **007-ship-public-deploy**. For technologies, project structure, shell commands,
+and other context for the current work, read the plan at `specs/007-ship-public-deploy/plan.md`
 (with its `research.md`, `data-model.md`, `contracts/`, and `quickstart.md`).
 <!-- SPECKIT END -->
