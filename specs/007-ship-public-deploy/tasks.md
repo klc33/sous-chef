@@ -160,7 +160,20 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
   emits one generic span per HTTP request only (all `run_type=chain`, no `llm` runs); the Groq adapter
   receives `usage` but never records it onto a span, so LangSmith has no token metadata to price. This is a
   provider-independent instrumentation gap (Phoenix would show the same) → a future enhancement (emit an
-  `llm` span per LLM call with OTel GenAI `gen_ai.usage.*` attributes), out of 007 scope.
+  `llm` span per LLM call with OTel GenAI `gen_ai.usage.*` attributes), out of 007 scope. **Tracked as T017j.**
+- [ ] T017j [US1] **LLM-span instrumentation so traces carry token usage + cost** (follow-up to T017i) —
+  today the app emits one generic span per HTTP request (all `run_type=chain`); no `llm`-type spans exist, so
+  LangSmith/Phoenix show **0 tokens / no cost**. Wrap each provider call (`app/infra/llm/groq.py`, and
+  `openai.py` for embeddings where applicable) in a child span named per the OTel **GenAI semantic
+  conventions** — set `gen_ai.system`, `gen_ai.request.model`, and the usage attributes
+  `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` from the `usage` the adapter already receives
+  (the Groq response carries it; it's currently only used for the agent's token bound). LangSmith's OTLP
+  ingest maps these to prompt/completion tokens → token usage shows; **cost** then shows once model pricing
+  is configured (LangSmith may lack default Groq pricing — add a custom price map if so). Keep golden rule #5
+  intact: usage attrs flow through the **same redacting exporter** (numbers, not PII). Add a unit test
+  asserting the LLM span carries the usage attributes. Acceptance: a live `POST /chat` turn appears in
+  LangSmith with non-zero `total_tokens` (and cost if priced). **Note:** likely warrants its own
+  `/speckit-specify` mini-feature rather than riding 007 — captured here so it isn't lost.
 
 ### 🟠 Known deviations / tech-debt from the live bring-up (reconcile vs the contracts/docs)
 > All four captured in [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) → **"Known deployment deviations (v0.1.0)"**.
