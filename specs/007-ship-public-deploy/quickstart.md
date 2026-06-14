@@ -16,8 +16,9 @@ git clone <repo> && cd sous-chef
 make up
 # seed real provider keys into the local (dev) Vault:
 export GROQ_API_KEY=... EMBEDDINGS_API_KEY=... && make seed
-# load the committed seed corpus (identical to prod):
-uv run python scripts/load_seed_corpus.py
+# load the committed seed corpus (identical to prod), inside the backend container so the in-network
+# POSTGRES_URL resolves — runs `python -m scripts.load_seed_corpus`, network-free + idempotent:
+make load-seed
 ```
 **Expect**: `GET http://localhost:8000/health` → 200; the widget at `http://localhost:5173` runs the demo
 scenario end-to-end; missing secrets produce a clear seed-pointing error (FR-014), not a crash.

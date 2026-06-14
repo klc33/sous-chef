@@ -8,6 +8,7 @@ missing secret raises rather than silently defaulting (FR-004/FR-010).
 from __future__ import annotations
 
 import hvac
+from hvac.exceptions import InvalidPath
 
 from app.config import VAULT_KEY_ADMIN_API_TOKEN, Settings
 from app.core.errors import StartupConfigError
@@ -35,9 +36,18 @@ class VaultAdapter:
         try:
             if not self._client.is_authenticated():
                 raise StartupConfigError("Vault authentication failed (check VAULT_TOKEN)")
-            resp = self._client.secrets.kv.v2.read_secret_version(
-                mount_point=_KV_MOUNT, path=_SECRET_PATH, raise_on_deleted_version=True
-            )
+            try:
+                resp = self._client.secrets.kv.v2.read_secret_version(
+                    mount_point=_KV_MOUNT, path=_SECRET_PATH, raise_on_deleted_version=True
+                )
+            except InvalidPath:
+                # The KV path is absent: Vault is reachable + authenticated but was never seeded.
+                # Point the operator straight at the seed step rather than a generic transport error
+                # (FR-014: missing secrets fail fast with a clear, actionable message).
+                raise StartupConfigError(
+                    f"Vault has no secrets at '{_KV_MOUNT}/{_SECRET_PATH}' — it has not been seeded. "
+                    "Run `make seed` (local) or `scripts/seed_vault.sh` against the prod VAULT_ADDR."
+                ) from None
             self._secrets = dict(resp["data"]["data"])
             self._loaded = True
             # The backend cannot guard /admin/* without the shared operator token, so its absence
