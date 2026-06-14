@@ -20,6 +20,9 @@ VAULT_TOKEN="${VAULT_TOKEN:-root}"
 GROQ_API_KEY="${GROQ_API_KEY:-dev-placeholder-groq-key}"
 EMBEDDINGS_API_KEY="${EMBEDDINGS_API_KEY:-dev-placeholder-embeddings-key}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-dev-placeholder-openai-key}"
+# LangSmith Cloud OTLP key — used ONLY when TRACING_PROVIDER=langsmith (else dormant, same pattern as
+# OPENAI_API_KEY). Local dev defaults to self-hosted Phoenix, so the placeholder is fine out of the box.
+LANGSMITH_API_KEY="${LANGSMITH_API_KEY:-dev-placeholder-langsmith-key}"
 
 # Operator-dashboard secrets (004-evals-and-uis). Same env-forward-or-placeholder pattern as the
 # provider keys above: real values are exported in the operator's shell before `make seed`; a fresh
@@ -39,7 +42,7 @@ ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-dev-placeholder-admin-api-token}"
 curl -sf -X POST \
   -H "X-Vault-Token: ${VAULT_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "{\"data\":{\"app_secret\":\"dev-placeholder-not-a-real-secret\",\"GROQ_API_KEY\":\"${GROQ_API_KEY}\",\"EMBEDDINGS_API_KEY\":\"${EMBEDDINGS_API_KEY}\",\"OPENAI_API_KEY\":\"${OPENAI_API_KEY}\",\"OPERATOR_PASSWORD_HASH\":\"${OPERATOR_PASSWORD_HASH}\",\"DASHBOARD_COOKIE_KEY\":\"${DASHBOARD_COOKIE_KEY}\",\"ADMIN_API_TOKEN\":\"${ADMIN_API_TOKEN}\"}}" \
+  -d "{\"data\":{\"app_secret\":\"dev-placeholder-not-a-real-secret\",\"GROQ_API_KEY\":\"${GROQ_API_KEY}\",\"EMBEDDINGS_API_KEY\":\"${EMBEDDINGS_API_KEY}\",\"OPENAI_API_KEY\":\"${OPENAI_API_KEY}\",\"LANGSMITH_API_KEY\":\"${LANGSMITH_API_KEY}\",\"OPERATOR_PASSWORD_HASH\":\"${OPERATOR_PASSWORD_HASH}\",\"DASHBOARD_COOKIE_KEY\":\"${DASHBOARD_COOKIE_KEY}\",\"ADMIN_API_TOKEN\":\"${ADMIN_API_TOKEN}\"}}" \
   "${VAULT_ADDR}/v1/secret/data/sous-chef" >/dev/null
 
-echo "seed_vault: wrote secret/sous-chef (app_secret, GROQ_API_KEY, EMBEDDINGS_API_KEY, OPENAI_API_KEY, OPERATOR_PASSWORD_HASH, DASHBOARD_COOKIE_KEY, ADMIN_API_TOKEN) to ${VAULT_ADDR}"
+echo "seed_vault: wrote secret/sous-chef (app_secret, GROQ_API_KEY, EMBEDDINGS_API_KEY, OPENAI_API_KEY, LANGSMITH_API_KEY, OPERATOR_PASSWORD_HASH, DASHBOARD_COOKIE_KEY, ADMIN_API_TOKEN) to ${VAULT_ADDR}"

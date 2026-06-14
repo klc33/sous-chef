@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.admin import register_admin_routers
 from app.api.health import register_health_router
 from app.api.user import register_user_routers
-from app.config import get_settings
+from app.config import VAULT_KEY_LANGSMITH_API_KEY, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.infra.cache import Cache
@@ -46,8 +46,16 @@ def create_app() -> FastAPI:
     db = Database(settings.postgres_url)
     cache = Cache(settings.redis_url) if settings.redis_url else None
 
-    # Configure tracing → Phoenix (redacted, best-effort: None means run untraced).
-    tracer = configure_tracing(settings)
+    # Configure tracing → Phoenix (self-hosted) or LangSmith Cloud, per settings.tracing_provider
+    # (redacted, best-effort: None means run untraced). The LangSmith API key is a Vault secret read
+    # here best-effort — a missing key just disables tracing and must never break startup (Decision 7).
+    tracing_api_key = None
+    if settings.tracing_provider.lower() == "langsmith":
+        try:
+            tracing_api_key = vault.get(VAULT_KEY_LANGSMITH_API_KEY)
+        except Exception:  # noqa: BLE001 — absent key disables tracing, never fails boot
+            log.warning("tracing.langsmith_key_missing")
+    tracer = configure_tracing(settings, api_key=tracing_api_key)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

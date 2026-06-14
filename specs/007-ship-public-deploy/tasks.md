@@ -119,7 +119,10 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
 > there — **zero cook-journey impact** (only the dashboard's routing-split metric is gone). Live at
 > `https://dashboard-production-cd55.up.railway.app`. See [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) →
 > *"Redis is optional…"* and [`dashboardxphoneix.md`](../../dashboardxphoneix.md) §C.1/§D.
-> ⛔ **Phoenix (T017c) still needs a slot** — move the widget off Railway (§C.2) or upgrade the plan.
+> ✅ **Phoenix slot problem (T017c) resolved by T017i:** prod tracing can target **LangSmith Cloud**
+> (`TRACING_PROVIDER=langsmith`), which needs **no Railway service** — so no slot, no widget move, no plan
+> upgrade. Code is merged; prod activation just needs the operator to seed `LANGSMITH_API_KEY` + flip the
+> var. Self-hosted Phoenix stays the local-dev default.
 - [X] T017b [US1] **Dashboard Railway service** — DONE: freed a slot by removing Redis (now optional), then
   created the `dashboard` service (repo source `klc33/sous-chef`, `railwayConfigFile=railway/dashboard.toml`,
   vars `VAULT_ADDR`=private Vault / `VAULT_TOKEN`=`${{sous-chef.VAULT_TOKEN}}` ref / `BACKEND_ADMIN_URL`=
@@ -133,7 +136,19 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
   service is running yet. Backend var `PHOENIX_COLLECTOR_ENDPOINT` is still the stale `http://localhost:6006`
   (tracing is silently off — non-blocking, so `/health` is unaffected). Create the Phoenix service (image
   `arizephoenix/phoenix`, shared Postgres `phoenix` schema) and repoint `PHOENIX_COLLECTOR_ENDPOINT` at its
-  private URL. (Blocked — see banner above.)
+  private URL. **Superseded for prod by T017i** (LangSmith Cloud needs no Railway service); Phoenix remains
+  the local-dev default.
+- [ ] T017i [US1] **Swap prod tracing to LangSmith Cloud (no Railway service → no slot)** — the chosen
+  resolution to the Phoenix slot problem (T017c). Tracing now has a `TRACING_PROVIDER` selector:
+  `phoenix` (self-hosted OTLP, default + local dev) or `langsmith` (LangSmith Cloud OTLP ingest). Both go
+  through the **same redacting OTLP exporter**, so golden rule #5 (redaction-before-export) holds for the
+  cloud destination too. — **CODE DONE:** `app/config.py` (`tracing_provider`, `langsmith_otlp_endpoint`,
+  `langsmith_project`, `VAULT_KEY_LANGSMITH_API_KEY`), `app/infra/tracing.py` (`_exporter_config` adds
+  auth headers `x-api-key`/`Langsmith-Project`), `app/main.py` (reads the key from Vault best-effort),
+  `scripts/seed_vault.sh` + `.env.example` (LangSmith vars; key stays in Vault). New unit tests
+  `tests/unit/test_tracing_config.py`; lint + mypy + tests green. ⚠️ **PROD ACTIVATION (operator):** seed
+  the real `LANGSMITH_API_KEY` into prod Vault, set backend var `TRACING_PROVIDER=langsmith` (+ optional
+  `LANGSMITH_PROJECT`), redeploy. Decision/deviation recorded in `docs/DECISIONS.md` + `docs/SECURITY.md`.
 
 ### 🟠 Known deviations / tech-debt from the live bring-up (reconcile vs the contracts/docs)
 > All four captured in [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) → **"Known deployment deviations (v0.1.0)"**.

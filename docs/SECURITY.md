@@ -63,8 +63,12 @@ build. The embedded-injection-in-a-valid-request case (neutralize + serve remain
 [app/guardrails/output_rails.py](../app/guardrails/output_rails.py) is the last gate every turn passes:
 
 1. **Redaction** — runs [app/core/redaction.py](../app/core/redaction.py) over the free-text `reply` (the
-   only field that can carry a leaked secret/PII value) so nothing sensitive reaches logs **or** a Phoenix
-   span. This runs before the reply leaves **and** before any span is emitted (golden rule #5).
+   only field that can carry a leaked secret/PII value) so nothing sensitive reaches logs **or** a tracing
+   span. This runs before the reply leaves **and** before any span is emitted (golden rule #5). The span
+   destination is pluggable (`TRACING_PROVIDER`: self-hosted **Phoenix** by default, or **LangSmith Cloud**
+   in prod — see [DECISIONS.md](DECISIONS.md) D11), but redaction runs in the **same `_RedactingSpanExporter`
+   wrapper** for both, so no secret/PII egresses even when spans go to the third-party cloud sink. The
+   LangSmith API key itself is a Vault secret, never in env/image (golden rule #4).
 2. **Wall re-assertion** — re-fetches each surfaced recipe by id and re-runs `constraint_guard`, dropping
    any violator (fail-closed on an unparseable/unresolvable id).
 

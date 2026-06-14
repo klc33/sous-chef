@@ -178,3 +178,37 @@ server-side image-resolution service / new `placeholder_url` column — needless
 from the existing category, so it belongs in the client with zero new infrastructure (P3, P10). (c) Keep
 today's blank `card__img--placeholder` div with `alt=""` — leaves the detail view image-less and gives
 screen readers nothing; naming the recipe in `alt` is strictly more honest and accessible.
+
+# Decisions — 007 Ship to a Public URL
+
+## D11 — Tracing backend is pluggable: self-hosted Phoenix (dev) or LangSmith Cloud (prod), one selector
+
+**Decision.** Tracing keeps a single OTLP/HTTP export path but the destination is chosen by one setting,
+`TRACING_PROVIDER` ([app/config.py](../app/config.py)): `phoenix` (self-hosted collector — the default and
+local-dev path) or `langsmith` (LangSmith Cloud OTLP ingest). `_exporter_config`
+([app/infra/tracing.py](../app/infra/tracing.py)) resolves the endpoint + auth: Phoenix uses the collector
+base with no headers; LangSmith uses `…/otel/v1/traces` with `x-api-key` (the **Vault** secret
+`LANGSMITH_API_KEY`) + `Langsmith-Project`. Both run through the **same `_RedactingSpanExporter`**, so
+redaction-before-export (golden rule #5) holds for either destination. Selection/auth is best-effort: a
+LangSmith provider with no Vault key (or a Phoenix provider with no endpoint) resolves to `None` →
+tracing off, never a startup failure (Decision 7).
+
+**Why.** The deploy host (Railway free/trial) caps the project at 5 services, and a self-hosted Phoenix
+needs a 6th. LangSmith Cloud is a hosted OTLP sink, so prod gets real tracing with **no extra service** —
+no slot, no widget move, no plan upgrade. Keeping Phoenix as the default preserves the self-hosted,
+network-free local dev story (and the offline `make up` stack) unchanged; only `TRACING_PROVIDER=langsmith`
+opts a deploy into the cloud sink. The change is provider-shaped like D9 (LLM seam): one setting, one
+config resolver, zero changes to the request path or the redaction guarantee.
+
+**Cost / deviation.** This is a deliberate deviation from "self-hosted tracing" (CLAUDE.md): with
+`langsmith`, spans egress to a third-party cloud. The redacting exporter still strips secrets/PII **before**
+export (the `redaction.leak_count_max: 0` gate covers the span path), so no secret leaves — but it is
+external egress, and the LangSmith free tier caps monthly trace volume. The key stays in Vault (golden
+rule #4), never in env/image.
+
+**Alternatives rejected.** (a) **Self-hosted Phoenix on Railway** — the original design (T017c), blocked by
+the service cap; would need a paid plan or moving the widget to a free static host (kept as the documented
+fallback in [dashboardxphoneix.md](../dashboardxphoneix.md) §C.2). (b) **Phoenix Cloud / Arize** — same
+auth-header requirement as LangSmith, so no simpler; LangSmith chosen for its free developer tier + OTLP
+support. (c) **No prod tracing** — acceptable (tracing is non-blocking) but loses the observability story a
+reviewer expects; the selector makes real tracing essentially free to enable.

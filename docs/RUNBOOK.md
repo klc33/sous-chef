@@ -120,20 +120,37 @@ WHERE is_complete = true
        OR id NOT IN (SELECT recipe_id FROM nutrition_cache));
 ```
 
-## View traces in Phoenix
+## View traces (Phoenix self-hosted, or LangSmith Cloud)
 
 Each application request emits one redacted span (the tracing middleware in `app/main.py` →
-`app/infra/tracing.py`). Generate a request and inspect it (US4 / SC-004):
+`app/infra/tracing.py`). The destination is chosen by **`TRACING_PROVIDER`** (DECISIONS.md D11):
+`phoenix` (default, local dev) or `langsmith` (LangSmith Cloud — used in prod where the host's service
+cap leaves no room for a Phoenix service). Both export over OTLP/HTTP through the **same redacting
+exporter**, so no secret reaches either sink (FR-007, golden rule #5). Export is best-effort: an
+unreachable/misconfigured backend just runs the request untraced.
+
+**Local (Phoenix, default):**
 
 ```bash
 curl http://localhost:8000/health        # generates a request → a span
 # open the Phoenix UI at http://localhost:6006 and confirm a corresponding trace appears
 ```
 
-Redaction runs over span attributes **before** export, so no secret value reaches Phoenix
-(FR-007). Phoenix persists its trace store in the same Postgres instance
-(`PHOENIX_SQL_DATABASE_URL`). Tracing export is best-effort: if Phoenix is unreachable the request
-still succeeds untraced.
+Phoenix persists its trace store in the same Postgres instance (`PHOENIX_SQL_DATABASE_URL`).
+
+**Prod (LangSmith Cloud) — activation:** no Railway service needed.
+
+1. Seed the real key into the prod Vault (it's a secret; never in env/image):
+   ```bash
+   VAULT_ADDR="$PROD_VAULT_ADDR" VAULT_TOKEN="$VAULT_ROOT_TOKEN" LANGSMITH_API_KEY="lsv2_..." sh scripts/seed_vault.sh
+   ```
+2. Flip the backend variables and redeploy:
+   ```bash
+   railway variables --service sous-chef --set TRACING_PROVIDER=langsmith --set LANGSMITH_PROJECT=souschef
+   ```
+3. Generate traffic and confirm traces appear in the LangSmith project. (`LANGSMITH_OTLP_ENDPOINT` defaults
+   to `https://api.smith.langchain.com/otel`; override only for self-hosted LangSmith.) Vault must be
+   unsealed at boot so the backend can read `LANGSMITH_API_KEY`.
 
 ## Confirm no secret reaches the logs (SC-003)
 
@@ -278,8 +295,10 @@ and a reachable Vault. **Real secrets live in Vault, never in Railway variables 
 | `VAULT_ADDR` | URL of the production Vault (not dev mode) |
 | `VAULT_TOKEN` | injected by the platform; never committed |
 | `POSTGRES_URL` | Railway Postgres connection URL (`postgresql+psycopg://…`) |
-| `REDIS_URL` | Railway Redis connection URL |
-| `PHOENIX_COLLECTOR_ENDPOINT` | Phoenix collector base URL (tracing is best-effort) |
+| `REDIS_URL` | **Optional** — Railway Redis URL. Omit to run cache-less (see "Redis is optional…" below) |
+| `TRACING_PROVIDER` | `phoenix` (default) or `langsmith` (prod, no extra service — D11) |
+| `PHOENIX_COLLECTOR_ENDPOINT` | Phoenix collector base URL (only when `TRACING_PROVIDER=phoenix`; best-effort) |
+| `LANGSMITH_PROJECT` | LangSmith project name (only when `TRACING_PROVIDER=langsmith`; non-secret). The `LANGSMITH_API_KEY` is a **Vault** secret, not a Railway var |
 
 > Production Vault provisioning + seeding (vs. the local `-dev` mode) is a Phase 6 follow-up
 > tracked in `research.md`; until then point `VAULT_ADDR`/`VAULT_TOKEN` at a reachable Vault whose

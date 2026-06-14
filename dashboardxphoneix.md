@@ -103,6 +103,13 @@ uv run streamlit run dashboard/app.py --server.port=8501
 
 ## B. Phoenix tracing — run locally (Docker) against prod Postgres
 
+> ✅ **Recommended for prod tracing: use LangSmith Cloud instead (no slot needed).** Tracing now has a
+> `TRACING_PROVIDER` selector (T017i / DECISIONS.md D11): set it to `langsmith` and the backend ships
+> redacted spans to LangSmith Cloud — **no Railway service**, so it sidesteps the cap entirely. Activation
+> is in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) → *"View traces …"* (seed `LANGSMITH_API_KEY` into Vault, set
+> `TRACING_PROVIDER=langsmith`, redeploy). The local-Docker Phoenix below is still useful for **offline/local**
+> trace inspection.
+
 Phoenix persists traces in the **shared prod Postgres**, in the `phoenix` schema (already created in prod).
 Running the upstream image locally gives you the Phoenix UI immediately.
 

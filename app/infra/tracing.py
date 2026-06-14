@@ -1,10 +1,12 @@
-"""OpenTelemetry tracing wired to a self-hosted Phoenix collector, with redaction-before-export.
+"""OpenTelemetry tracing over OTLP/HTTP, with redaction-before-export.
 
-Every application request emits a span (see the middleware wired in app/main.py); spans are
-batched and shipped to Phoenix over OTLP/HTTP. A wrapping exporter runs core.redaction.redact
-over every span attribute BEFORE the batch leaves the process, so no secret value can reach the
-trace store (FR-007, trace half). All setup and export is best-effort: a failure to reach or
-configure Phoenix degrades to "no tracing" and must never fail a request (Decision 7).
+Every application request emits a span (see the middleware wired in app/main.py); spans are batched
+and shipped over OTLP/HTTP to the configured backend — self-hosted **Phoenix** (default) or
+**LangSmith Cloud** (`TRACING_PROVIDER=langsmith`, which needs no Railway service). A wrapping exporter
+runs core.redaction.redact over every span attribute BEFORE the batch leaves the process, so no secret
+value can reach the trace store for EITHER destination (FR-007, trace half; golden rule #5). All setup
+and export is best-effort: a failure to reach or configure the backend degrades to "no tracing" and must
+never fail a request (Decision 7).
 """
 
 from __future__ import annotations
@@ -35,15 +37,41 @@ _OTLP_TRACES_PATH = "/v1/traces"
 
 
 def _traces_endpoint(base: str) -> str:
-    """Return the full OTLP/HTTP traces URL from the configured Phoenix base endpoint.
+    """Return the full OTLP/HTTP traces URL from a configured collector base endpoint.
 
-    PHOENIX_COLLECTOR_ENDPOINT is the collector base (e.g. http://phoenix:6006); the OTLP/HTTP
-    exporter wants the concrete /v1/traces path. Idempotent if the path is already present.
+    The base is the collector root (Phoenix e.g. http://phoenix:6006, or LangSmith
+    https://api.smith.langchain.com/otel); the OTLP/HTTP exporter wants the concrete /v1/traces path.
+    Idempotent if the path is already present.
     """
     trimmed = base.rstrip("/")
     if trimmed.endswith(_OTLP_TRACES_PATH):
         return trimmed
     return trimmed + _OTLP_TRACES_PATH
+
+
+def _exporter_config(
+    settings: Settings, api_key: str | None
+) -> tuple[str, dict[str, str]] | None:
+    """Resolve the (OTLP traces URL, headers) for the configured backend, or None to disable tracing.
+
+    `tracing_provider` selects the destination — both are plain OTLP/HTTP behind the same redacting
+    exporter, the only difference is endpoint + auth headers:
+      * "langsmith" → LangSmith Cloud ingest + `x-api-key`/`Langsmith-Project` headers. Requires the
+        Vault-sourced `api_key`; a missing key returns None (tracing off) rather than failing startup.
+      * "phoenix" (default) → the self-hosted collector endpoint with no auth; None when it is unset.
+    Returning None keeps tracing strictly best-effort (Decision 7) — a misconfigured backend disables
+    tracing instead of spamming exports or breaking boot.
+    """
+    provider = (settings.tracing_provider or "phoenix").lower()
+    if provider == "langsmith":
+        if not api_key:
+            return None
+        headers = {"x-api-key": api_key, "Langsmith-Project": settings.langsmith_project}
+        return _traces_endpoint(settings.langsmith_otlp_endpoint), headers
+    # Default: self-hosted Phoenix collector (no auth headers).
+    if not settings.phoenix_collector_endpoint:
+        return None
+    return _traces_endpoint(settings.phoenix_collector_endpoint), {}
 
 
 def _redacted_copy(span: ReadableSpan) -> ReadableSpan:
@@ -94,21 +122,23 @@ class _RedactingSpanExporter:
         return self._inner.force_flush(timeout_millis)
 
 
-def configure_tracing(settings: Settings) -> Tracer | None:
-    """Set up the global tracer provider exporting redacted spans to Phoenix; return a tracer.
+def configure_tracing(settings: Settings, api_key: str | None = None) -> Tracer | None:
+    """Set up the global tracer provider exporting redacted spans to the configured backend; return it.
 
-    Builds a TracerProvider tagged with the service name + environment, attaches a batch
-    processor over the redacting exporter, and installs it globally. When no collector endpoint is
-    configured, tracing is disabled (returns None) so a deploy without Phoenix doesn't spam export
-    retries. Any failure (missing OTLP extra, bad config) is logged and also yields None — tracing
-    is never allowed to break startup or a request (Decision 7).
+    Builds a TracerProvider tagged with the service name + environment, attaches a batch processor over
+    the redacting exporter (golden rule #5: redaction happens before export, for Phoenix OR LangSmith),
+    and installs it globally. The destination + auth come from `_exporter_config`; when it returns None
+    (no endpoint, or LangSmith selected with no Vault key) tracing is disabled so a deploy without a
+    backend doesn't spam export retries. `api_key` is the LangSmith Vault secret, ignored for Phoenix.
+    Any failure (missing OTLP extra, bad config) is logged and also yields None — tracing is never
+    allowed to break startup or a request (Decision 7).
     """
-    endpoint = settings.phoenix_collector_endpoint
-    if not endpoint:
-        # No Phoenix collector configured for this deploy — run untraced rather than retrying
-        # span exports against a dead endpoint.
-        log.info("tracing.disabled", reason="PHOENIX_COLLECTOR_ENDPOINT not set")
+    cfg = _exporter_config(settings, api_key)
+    if cfg is None:
+        # No backend resolved for this deploy — run untraced rather than retrying against a dead endpoint.
+        log.info("tracing.disabled", provider=settings.tracing_provider)
         return None
+    endpoint, headers = cfg
     try:
         from opentelemetry import trace
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -120,11 +150,11 @@ def configure_tracing(settings: Settings) -> Tracer | None:
             {"service.name": _SERVICE_NAME, "deployment.environment": settings.env}
         )
         provider = TracerProvider(resource=resource)
-        exporter = OTLPSpanExporter(endpoint=_traces_endpoint(endpoint))
+        exporter = OTLPSpanExporter(endpoint=endpoint, headers=headers or None)
         redacting = cast("SpanExporter", _RedactingSpanExporter(exporter))
         provider.add_span_processor(BatchSpanProcessor(redacting))
         trace.set_tracer_provider(provider)
-        log.info("tracing.configured", endpoint=endpoint)
+        log.info("tracing.configured", provider=settings.tracing_provider, endpoint=endpoint)
         return trace.get_tracer(_SERVICE_NAME)
     except Exception as exc:  # never let tracing setup abort startup
         log.warning("tracing.setup_failed", error=str(exc))

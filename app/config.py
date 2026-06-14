@@ -26,6 +26,9 @@ MIGRATION_EMBEDDINGS_DIM = 1536
 VAULT_KEY_OPERATOR_PASSWORD_HASH = "OPERATOR_PASSWORD_HASH"
 VAULT_KEY_DASHBOARD_COOKIE_KEY = "DASHBOARD_COOKIE_KEY"
 VAULT_KEY_ADMIN_API_TOKEN = "ADMIN_API_TOKEN"
+# Tracing API key — a SECRET, lives only in Vault (golden rule #4). Used when TRACING_PROVIDER=langsmith
+# so the OTLP exporter can authenticate to LangSmith Cloud; self-hosted Phoenix needs no key.
+VAULT_KEY_LANGSMITH_API_KEY = "LANGSMITH_API_KEY"
 
 
 class Settings(BaseSettings):
@@ -65,6 +68,16 @@ class Settings(BaseSettings):
     # app runs untraced. Export is best-effort and must never block startup or requests, so a deploy
     # without a Phoenix collector simply turns tracing off rather than spamming export retries.
     phoenix_collector_endpoint: str | None = Field(default=None)
+
+    # Tracing backend selector: "phoenix" (self-hosted OTLP collector — the default + local dev) or
+    # "langsmith" (LangSmith Cloud OTLP ingest — needs NO Railway service, so it sidesteps the host's
+    # service cap). Both export through the SAME redacting OTLP exporter, so golden rule #5
+    # (redaction-before-export) holds for either destination. See docs/DECISIONS.md.
+    tracing_provider: str = Field(default="phoenix")
+    # LangSmith Cloud OTLP ingest endpoint + project (non-secret). The API key is a SECRET from Vault
+    # (VAULT_KEY_LANGSMITH_API_KEY). Only consulted when tracing_provider == "langsmith".
+    langsmith_otlp_endpoint: str = Field(default="https://api.smith.langchain.com/otel")
+    langsmith_project: str = Field(default="souschef")
 
     # ── 003-intelligent-behavior: turn-pipeline tuning (all non-secret) ───────────────────────
     # Embeddings provider (OpenAI-compatible). Base URL + model are swappable without code changes;
