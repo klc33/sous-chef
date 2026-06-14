@@ -215,9 +215,23 @@ If you also need a slot for Phoenix, free a second one by moving the static `wid
 
 ## D. Create the dashboard as a Railway service (after freeing a slot via §C.1)
 
+> ✅ **DONE** — the dashboard is live (unadvertised) at
+> **`https://dashboard-production-cd55.up.railway.app`** (`/_stcore/health` → 200). The steps below are
+> what was run; two non-obvious gotchas are flagged so a redo/rebuild reproduces it.
+
 Once the Redis slot is free, deploy the dashboard from the repo. It builds from `dashboard/Dockerfile`,
 so you **must** point it at `railway/dashboard.toml` or it inherits the root `railway.toml` and wrongly
 runs the backend's start command (the T017g trap).
+
+> **Gotcha 1 — `$PORT` needs a shell.** Railway runs `startCommand` *without* a shell, so a bare `$PORT`
+> reaches Streamlit literally (`"'$PORT' is not a valid integer"` → 502). `railway/dashboard.toml` now
+> wraps it in `sh -c '…'` (commit `2be7d83`). If you re-author it, keep the `sh -c` wrapper.
+>
+> **Gotcha 2 — deploy the commit that has the toml.** `railwayConfigFile` (the toml) takes precedence over
+> any instance-level startCommand override, and `serviceInstanceDeployV2` deploys the service's *pinned*
+> commit, not `main` HEAD. So you must deploy the commit that contains the fixed toml, e.g.
+> `serviceInstanceDeployV2(… commitSha: "<HEAD with the toml fix>")`, or in the UI redeploy from the
+> latest commit.
 
 ```powershell
 $env:RAILWAY_TOKEN = "<project token, or: railway login; railway link>"

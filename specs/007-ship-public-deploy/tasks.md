@@ -114,15 +114,21 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
 > ⛔ **WAS BLOCKED ON RAILWAY PLAN LIMIT** (T017b/c): the workspace is on the **Free/trial plan at its
 > service cap (5/5: backend, Vault, Redis, widget, Postgres)** — `railway add` returns *"Free plan resource
 > provision limit exceeded."* The `phoenix` schema was pre-created in prod Postgres.
-> ✅ **Slot path for T017b (dashboard):** **Redis is now optional** (`REDIS_URL` unset → no cache, `/health`
-> drops the redis check; its only use was the dashboard's best-effort routing-split metric). So the `Redis`
-> service can be deleted to free a slot for the `dashboard` with **zero cook-journey impact** — see
-> [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) → *"Redis is optional…"* and [`dashboardxphoneix.md`](../../dashboardxphoneix.md) §C.1/§D.
-> Phoenix (T017c) still needs a second slot (move the widget off Railway, §C.2) or a plan upgrade.
-- [ ] T017b [US1] **Dashboard Railway service not created** — `railway/dashboard.toml` exists but no
-  `dashboard` service is running yet (operator-gated Streamlit on a separate, unadvertised URL). Create
-  it: repo source, `railwayConfigFile=railway/dashboard.toml`, vars `VAULT_ADDR/VAULT_TOKEN`,
-  `BACKEND_ADMIN_URL`, `OPERATOR_USERNAME`; no advertised domain. (Blocked — see banner above.)
+> ✅ **T017b (dashboard) DONE via the Redis slot:** Redis was made optional (`REDIS_URL` unset → no cache,
+> `/health` drops the redis check), the `Redis` service deleted to free a slot, and the `dashboard` deployed
+> there — **zero cook-journey impact** (only the dashboard's routing-split metric is gone). Live at
+> `https://dashboard-production-cd55.up.railway.app`. See [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) →
+> *"Redis is optional…"* and [`dashboardxphoneix.md`](../../dashboardxphoneix.md) §C.1/§D.
+> ⛔ **Phoenix (T017c) still needs a slot** — move the widget off Railway (§C.2) or upgrade the plan.
+- [X] T017b [US1] **Dashboard Railway service** — DONE: freed a slot by removing Redis (now optional), then
+  created the `dashboard` service (repo source `klc33/sous-chef`, `railwayConfigFile=railway/dashboard.toml`,
+  vars `VAULT_ADDR`=private Vault / `VAULT_TOKEN`=`${{sous-chef.VAULT_TOKEN}}` ref / `BACKEND_ADMIN_URL`=
+  public backend / `OPERATOR_USERNAME`=operator). **Live (unadvertised):**
+  `https://dashboard-production-cd55.up.railway.app` — `/_stcore/health` → 200. Two gotchas hit + fixed:
+  (1) `railway/dashboard.toml` `startCommand` needed `sh -c '…'` so Railway expands `$PORT` (commit
+  `2be7d83`); (2) `railwayConfigFile` (toml) takes precedence over an instance-level startCommand override,
+  and `serviceInstanceDeployV2` pins to the service's commit — so the deploy had to target the commit that
+  carries the toml fix (deployed `commitSha=2be7d83`). Vault was unsealed + dashboard secrets present.
 - [ ] T017c [US1] **Phoenix Railway service not created** — `railway/phoenix.toml` exists but no `phoenix`
   service is running yet. Backend var `PHOENIX_COLLECTOR_ENDPOINT` is still the stale `http://localhost:6006`
   (tracing is silently off — non-blocking, so `/health` is unaffected). Create the Phoenix service (image
