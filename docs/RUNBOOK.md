@@ -311,3 +311,48 @@ from the repo and must be done by an operator with account access:
 > Postgres (pgvector), Redis, and a dev-mode Vault service; `/health` returns `200` with all
 > dependencies `ok` at the public URL above. **FR-008 / SC-005 closed.** (Tracing runs only where a
 > Phoenix collector is configured; this deploy runs untraced by design — see the tracing note.)
+
+## Known deployment deviations (v0.1.0)
+
+Reconciliation notes from the live `007-ship-public-deploy` bring-up — accepted deviations from the
+contracts/docs, captured so an operator isn't surprised. None block the cook journey (live +
+allergen-wall-verified). Each maps to a Phase 3b follow-up task in
+[`specs/007-ship-public-deploy/tasks.md`](../specs/007-ship-public-deploy/tasks.md).
+
+### Vault image pinned to `hashicorp/vault:1.13.3` (T017d)
+
+The prod Vault service runs **`hashicorp/vault:1.13.3`**, a deliberate downgrade. The current 2.x image
+runs as a non-root user (uid 100) and cannot write the root-owned Railway volume
+(`mkdir /vault/data/core: permission denied`); 1.13.3 runs as root and writes the persistent volume
+cleanly. **Revisit** when the upstream image/volume-ownership story improves (e.g. an init container that
+`chown`s the volume, or a Railway volume mounted writable for uid 100), then unpin.
+
+### Vault re-seals on every redeploy — manual unseal required (T017e)
+
+Prod Vault is server-mode with **1 key share / threshold 1**, so it **seals on every redeploy** and the
+operator must `vault operator unseal` (or via the public endpoint below) before the backend can read its
+secrets and go healthy. This posture is accepted for v0.1.0, but it means **every Vault redeploy needs a
+manual unseal** or the backend boots unhealthy.
+
+> **Recommended fix:** configure **auto-unseal** with a cloud KMS (`seal "awskms"`/`gcpckms`/`transit`)
+> so the backend boots unattended. Until then, after any Vault redeploy: unseal Vault first, then confirm
+> `/health` → 200 on the backend.
+
+### Vault has a public HTTPS endpoint (T017f)
+
+Vault is reachable at a **public** Railway domain (`https://efficient-dream-production-e88d.up.railway.app`)
+**only** for operator init/unseal/seed. It is sealed-by-default and root-token-gated, and the backend
+reaches Vault over the **private** network — but a public ingress on Vault is a deviation from the
+"no public ingress for Vault" topology in
+[`contracts/`](../specs/007-ship-public-deploy/contracts/)/[`data-model.md`](../specs/007-ship-public-deploy/data-model.md).
+**Remove the public domain once auto-unseal lands** (T017e), or accept + document it as here.
+
+### Per-service Railway config-as-code gotcha (T017g)
+
+A Railway service whose repo has a **root `railway.toml`** inherits it **unless** the service sets
+`railwayConfigFile` to its own per-service file. During bring-up the `widget` service initially ran the
+**backend's** `alembic` start command + `/health` gate until it was pointed at
+[`railway/widget.toml`](../railway/widget.toml); it also needs `PORT=80` so Railway's networking targets
+nginx. **Every non-backend service must set its own `railwayConfigFile`** — the `dashboard` and `phoenix`
+services (T017b/T017c) must each point at [`railway/dashboard.toml`](../railway/dashboard.toml) /
+[`railway/phoenix.toml`](../railway/phoenix.toml) to avoid the same trap.

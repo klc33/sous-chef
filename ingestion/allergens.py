@@ -62,17 +62,22 @@ _OFF_TAG_MAP: dict[str, Allergen] = {
     "sesame-seeds": Allergen.SESAME,
 }
 
-# Meat/poultry keywords → not vegetarian, not pescatarian, not vegan.
+# Meat/poultry keywords → not vegetarian, not pescatarian, not vegan. Meat carries no top-9 allergen tag,
+# so it is detected by name ALONE — meaning a missing cut (e.g. "oxtail") silently reads as vegan. Adding
+# a term only ever makes diets STRICTER (fail-closed), so the list is curated broadly toward real meats;
+# we still avoid short substrings that collide with vegan staples (e.g. "kidney" → kidney beans, "rib" →
+# spare-rib vs nothing, "liver" → deliver) to keep genuinely-vegan recipes surfaceable.
 _MEAT_POULTRY = (
     "beef", "chicken", "pork", "lamb", "bacon", "ham", "turkey", "duck",
     "veal", "goat", "sausage", "gelatin", "gelatine", "venison", "steak",
     "mince", "prosciutto", "salami", "pepperoni", "chorizo", "meat",
+    # Cuts/forms previously missed (the "oxtail reads as vegan" bug, T017a) — all unambiguous meats.
+    "oxtail", "brisket", "pancetta", "guanciale", "mortadella", "andouille",
+    "kielbasa", "bratwurst", "frankfurter", "foie", "escargot", "snail",
+    "quail", "pheasant", "rabbit", "tripe",
 )
-# Seafood keywords → not vegetarian/vegan, but pescatarian-compatible.
-_SEAFOOD = ALLERGEN_KEYWORDS[Allergen.FISH] + ALLERGEN_KEYWORDS[Allergen.SHELLFISH]
-# Animal-product (non-meat) keywords → not vegan (but still vegetarian).
-_DAIRY = ALLERGEN_KEYWORDS[Allergen.MILK]
-_EGGS = ALLERGEN_KEYWORDS[Allergen.EGGS]
+# Non-vegan, non-allergen animal product detected by name keyword (dairy/eggs/seafood now ride the
+# allergen tags instead — see `derive_diet_flags`).
 _NON_VEGAN_OTHER = ("honey",)
 
 # A broad known-safe vocabulary: common ingredients that carry none of the nine allergens. An ingredient
@@ -104,9 +109,68 @@ _KNOWN_SAFE = (
 )
 
 
+# Whole foods we trust to carry ZERO top-9 allergens. Open Food Facts is matched by free-text product
+# search and routinely returns a *packaged* product for a bare ingredient (searching "garlic" matches
+# "garlic bread", searching "salt" matches a seasoning blend), so its `allergens_tags` falsely tag these
+# staples with milk/eggs/etc. For an ingredient whose name matches one of these, we IGNORE OFF allergen
+# tags (the keyword map still applies, and OFF nutriments are still used) — this de-noises both the wall
+# and the diet flags without ever dropping a real allergen, since these foods have none (T017a).
+_OFF_TRUSTED_SAFE = (
+    "water", "salt", "sugar", "garlic", "onion", "shallot", "scallion", "leek",
+    "chive", "tomato", "potato", "carrot", "celery", "cucumber", "lettuce",
+    "spinach", "kale", "chard", "cabbage", "broccoli", "cauliflower", "zucchini",
+    "courgette", "eggplant", "aubergine", "pumpkin", "squash", "beet", "radish",
+    "turnip", "parsnip", "okra", "asparagus", "artichoke", "mushroom",
+    "bell pepper", "jalapeno", "chili", "chilli", "corn", "pea ", "peas",
+    "lemon", "lime", "orange", "apple", "banana", "berry", "strawberry",
+    "blueberry", "raspberry", "blackberry", "cranberry", "currant", "grape",
+    "melon", "mango", "pineapple", "peach", "pear", "plum", "cherry", "kiwi",
+    "apricot", "fig", "date", "raisin", "prune", "ginger", "turmeric", "cumin",
+    "paprika", "cinnamon", "nutmeg", "clove", "bay leaf", "cardamom", "fennel",
+    "anise", "caraway", "sumac", "cayenne", "peppercorn", "tarragon",
+    "marjoram", "saffron", "allspice", "oregano", "basil", "thyme", "rosemary",
+    "sage", "dill", "mint", "parsley", "cilantro", "coriander", "lemongrass",
+    "horseradish",
+)
+
+
 def _matches(name: str, keywords: tuple[str, ...]) -> bool:
     """Return True when any keyword appears as a substring of the normalized ingredient name."""
     return any(kw in name for kw in keywords)
+
+
+def _keyword_allergens(name: str) -> set[Allergen]:
+    """Return the allergens whose keyword map matches the normalized ingredient name (no OFF)."""
+    return {a for a, kws in ALLERGEN_KEYWORDS.items() if _matches(name, kws)}
+
+
+def derive_diet_flags(
+    per_ingredient: list[tuple[str, set[Allergen]]], certain: bool
+) -> dict[str, bool]:
+    """Derive the three diet flags from each ingredient's (name, final allergen tags) + recipe certainty.
+
+    Animal-derived allergen TAGS are the diet signal for dairy/eggs/seafood — not a separate keyword pass —
+    so a tag added by EITHER the keyword map OR Open Food Facts fails the matching diet closed (this fixes
+    the bug where an OFF-only milk tag left a recipe flagged vegan). Meat/poultry and honey carry no top-9
+    allergen, so they stay name-keyword signals. Uncertainty forces every flag False so stricter diets fail
+    closed. Shared by `analyze()` (live ingest) and the seed-corpus regenerator so both stay identical.
+    """
+    has_meat_poultry = any(_matches(name, _MEAT_POULTRY) for name, _ in per_ingredient)
+    has_seafood = any(
+        Allergen.FISH in tags or Allergen.SHELLFISH in tags for _, tags in per_ingredient
+    )
+    has_dairy = any(Allergen.MILK in tags for _, tags in per_ingredient)
+    has_eggs = any(Allergen.EGGS in tags for _, tags in per_ingredient)
+    has_other_non_vegan = any(_matches(name, _NON_VEGAN_OTHER) for name, _ in per_ingredient)
+
+    is_vegetarian = certain and not has_meat_poultry and not has_seafood
+    is_vegan = is_vegetarian and not has_dairy and not has_eggs and not has_other_non_vegan
+    is_pescatarian = certain and not has_meat_poultry
+    return {
+        "is_vegetarian": is_vegetarian,
+        "is_vegan": is_vegan,
+        "is_pescatarian": is_pescatarian,
+    }
 
 
 def analyze(
@@ -121,63 +185,47 @@ def analyze(
     """
     recipe_allergens: set[Allergen] = set()
     certain = True
-    has_meat_poultry = False
-    has_seafood = False
-    has_dairy = False
-    has_eggs = False
-    has_other_non_vegan = False
+    per_ingredient: list[tuple[str, set[Allergen]]] = []
 
     for ing in ingredients:
         name = ing["name"].lower()
-        tags: set[Allergen] = set()
 
         # Primary signal: the curated keyword map.
-        for allergen, keywords in ALLERGEN_KEYWORDS.items():
-            if _matches(name, keywords):
-                tags.add(allergen)
+        tags: set[Allergen] = _keyword_allergens(name)
 
-        # Supplement: OFF allergen tags (cached lookup), if an adapter was provided.
+        # Supplement: OFF allergen tags (cached lookup), if an adapter was provided — but NOT for trusted
+        # whole foods, where OFF's product search returns false positives (garlic → "garlic bread" → milk).
         off_recognized = False
         if off is not None:
             payload = off.lookup_ingredient(ing["name"])
-            for raw_tag in payload.get("allergen_tags", []):
-                mapped = _OFF_TAG_MAP.get(raw_tag)
-                if mapped is not None:
-                    tags.add(mapped)
+            if not _matches(name, _OFF_TRUSTED_SAFE):
+                for raw_tag in payload.get("allergen_tags", []):
+                    mapped = _OFF_TAG_MAP.get(raw_tag)
+                    if mapped is not None:
+                        tags.add(mapped)
             off_recognized = bool(payload.get("allergen_tags") or payload.get("nutriments"))
 
         ing["allergen_tags"] = sorted(t.value for t in tags)
         recipe_allergens |= tags
-
-        # Diet signals from the same normalized name.
-        is_meat = _matches(name, _MEAT_POULTRY)
-        if is_meat:
-            has_meat_poultry = True
-        if _matches(name, _SEAFOOD):
-            has_seafood = True
-        if _matches(name, _DAIRY):
-            has_dairy = True
-        if _matches(name, _EGGS):
-            has_eggs = True
-        if _matches(name, _NON_VEGAN_OTHER):
-            has_other_non_vegan = True
+        per_ingredient.append((name, tags))
 
         # Recognition: an allergen tag, a known meat/poultry, a known-safe keyword, or an OFF hit.
         # Meat/poultry carry no allergen tag yet are clearly identified, so they must count as
         # recognized — otherwise a plain "chicken" would wrongly flip the whole recipe to uncertain.
-        recognized = bool(tags) or is_meat or _matches(name, _KNOWN_SAFE) or off_recognized
+        recognized = (
+            bool(tags)
+            or _matches(name, _MEAT_POULTRY)
+            or _matches(name, _KNOWN_SAFE)
+            or off_recognized
+        )
         if not recognized:
             certain = False
 
-    # Derive diet flags; uncertainty forces them all False so stricter diets fail closed.
-    is_vegetarian = certain and not has_meat_poultry and not has_seafood
-    is_vegan = is_vegetarian and not has_dairy and not has_eggs and not has_other_non_vegan
-    is_pescatarian = certain and not has_meat_poultry
+    # Derive diet flags from the final (keyword ∪ trusted-filtered OFF) tags; uncertainty fails them closed.
+    flags = derive_diet_flags(per_ingredient, certain)
 
     return {
         "allergens": sorted(a.value for a in recipe_allergens),
         "allergen_certain": certain,
-        "is_vegetarian": is_vegetarian,
-        "is_vegan": is_vegan,
-        "is_pescatarian": is_pescatarian,
+        **flags,
     }
