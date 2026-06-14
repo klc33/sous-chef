@@ -22,7 +22,10 @@ dockerfilePath = "dashboard/Dockerfile"
 # Mirror the dashboard Dockerfile CMD but bind to the Railway-injected $PORT (the image defaults to 8501;
 # overriding --server.port keeps it correct if Railway assigns a different port). Headless disables the
 # "open a browser" prompt. Secrets (operator hash, cookie key, admin token) are read from Vault at runtime.
-startCommand = "streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true"
+# MUST be wrapped in `sh -c '...'`: Railway runs startCommand WITHOUT a shell, so a bare `$PORT` is passed
+# literally and Streamlit rejects it ("'$PORT' is not a valid integer"). The shell expands it (same posture
+# as the backend's railway.toml).
+startCommand = "sh -c 'streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true'"
 
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
