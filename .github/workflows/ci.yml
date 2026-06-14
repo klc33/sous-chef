@@ -131,3 +131,91 @@ jobs:
       # pure safety gates (red-team, redaction) thus run in BOTH jobs — belt and suspenders.
       - name: Run the full test suite (unit + integration + red-team)
         run: uv run pytest tests/unit tests/integration tests/redteam -q
+
+  # ── Full evals on a live stack: the offline RAG hit@3/MRR + agent gates RUN (no skips) (US2/T018) ──
+  # The hermetic `gates` job grades the deterministic safety gates but SKIPs the offline RAG + agent gates
+  # (no corpus, no provider keys). This job provisions the missing pieces so `make evals` grades the FULL
+  # set: real Postgres(pgvector)+Redis, a dev Vault seeded with the real GROQ_API_KEY/EMBEDDINGS_API_KEY
+  # Actions secrets, the migration applied, and the committed seed corpus loaded — so the same offline
+  # gates that prove retrieval/agent quality on a developer machine become a merge-blocking required check
+  # (contracts/ci-gate.md). The non-deterministic LLM-judge rows stay report-only inside run_evals (they
+  # never set the exit code), and thresholds come from committed eval_thresholds.yaml — never weakened to
+  # pass (constitution P6). LLM-judge/RAG/agent gates make real hosted-provider calls, by design.
+  evals-full:
+    runs-on: ubuntu-latest
+    env:
+      ENV: ci
+      VAULT_ADDR: http://localhost:8200
+      VAULT_TOKEN: root
+      POSTGRES_URL: postgresql+psycopg://postgres:postgres@localhost:5432/souschef
+      REDIS_URL: redis://localhost:6379/0
+      PHOENIX_COLLECTOR_ENDPOINT: http://localhost:6006
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: souschef
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d souschef"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      # lfs: true so the LFS-stored seed vectors (seeds/corpus/embeddings.npy) are fetched as real bytes,
+      # not pointer files — load_seed_corpus.py np.load()s them and would otherwise abort on a bad shape.
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Same dev-Vault pattern as `smoke`, but the real provider keys (GitHub Actions secrets) are
+      # forwarded into the seed step so they land in Vault — the offline RAG/agent/judge gates make real
+      # embeddings/Groq calls and read those keys from Vault exactly as the app does (golden rule #4).
+      - name: Start Vault (dev) and seed secrets (real provider keys)
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          EMBEDDINGS_API_KEY: ${{ secrets.EMBEDDINGS_API_KEY }}
+        run: |
+          docker run -d --name vault -p 8200:8200 --cap-add=IPC_LOCK \
+            -e VAULT_DEV_ROOT_TOKEN_ID=root \
+            hashicorp/vault:latest server -dev -dev-listen-address=0.0.0.0:8200
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:8200/v1/sys/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          sh scripts/seed_vault.sh
+
+      - name: Install backend + test + ml + evals deps
+        run: uv sync --frozen --extra backend --group test --group ml --group evals
+
+      # The classifier macro-F1 gate loads ml/artifacts/model.joblib; train it fresh (TF-IDF + logistic
+      # regression, no torch) so the gate grades a real artifact rather than FAILing on a missing input.
+      - name: Train the intent classifier (rebuild ml/artifacts/model.joblib)
+        run: make train
+
+      - name: Apply database migrations (baseline → vector extension)
+        run: uv run alembic upgrade head
+
+      # Network-free, idempotent upsert of the committed corpus + pre-computed vectors through the repo
+      # layer — the identical data path used at deploy and locally (FR-013). This is what lets the offline
+      # RAG + agent gates actually RUN here instead of skipping.
+      - name: Load the committed seed corpus into Postgres
+        run: uv run python -m scripts.load_seed_corpus
+
+      # Full grade: deterministic gates + the now-runnable offline RAG hit@3/MRR + agent tool-selection.
+      # Exit is non-zero iff a gate that RAN scored below its committed floor; the judge rows are
+      # report-only and never gate. A red gate means fix the cause, never weaken the threshold.
+      - name: Run the full eval suite (make evals)
+        run: make evals
