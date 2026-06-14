@@ -107,8 +107,12 @@ jobs:
           done
           sh scripts/seed_vault.sh
 
-      - name: Install backend + test deps
-        run: uv sync --frozen --extra backend --group test
+      # ingestion group too: four ingestion unit tests (tests/unit/test_food*_*.py,
+      # test_ingestion_allergens.py, test_nutrition_fallback.py) import `ingestion.*`, which needs
+      # pandas. pytest runs ONLY in this job, so without the group those modules fail collection.
+      # smoke is a CI job, not a shipped image, so adding pandas here doesn't violate the lean-image rule.
+      - name: Install backend + test + ingestion deps
+        run: uv sync --frozen --extra backend --group test --group ingestion
 
       - name: Apply database migrations (baseline → vector extension)
         run: uv run alembic upgrade head
