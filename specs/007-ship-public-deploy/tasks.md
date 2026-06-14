@@ -105,14 +105,17 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
   **0 remaining contradictions** (was 141), oxtail dishes now non-vegan, genuinely-vegan dishes retained
   (233→185 vegan after correctly dropping real non-vegan + de-noising). New unit test
   `tests/unit/test_ingestion_allergens.py`; `lint` + `test` (214) + `evals` (redteam 1.0 / redaction 0)
-  green. ⚠️ **Operator follow-up:** re-run `load_seed_corpus.py` against **prod** Postgres to propagate
-  (blocked here on Railway auth — see T017b/c note). **Do this before any vegan/vegetarian demo.**
+  green. **Propagated to prod:** the corrected flags + allergens were pushed into the prod Postgres (the
+  WAN `load_seed_corpus.py` single-txn was too slow, so a JSON-driven bulk UPDATE of the changed columns
+  was used; embeddings untouched) — prod now reads **899 vegetarian / 185 vegan, 0 vegan↔allergen
+  contradictions**, oxtail dishes non-vegan. The wall re-reads these at query time, so it is **live**.
 
 ### 🟡 Incomplete deployment surface (configs written, live services not yet created)
-> ⛔ **BLOCKED ON RAILWAY AUTH** (T017b/c + the T017a prod reload): the CLI is installed but the
-> `.env` `railway_token` is invalid/expired and `railway login` is interactive (browser) — these live-infra
-> mutations cannot be done non-interactively from here. Operator must `railway login` (or supply a valid
-> token), then run the commands noted below.
+> ⛔ **BLOCKED ON RAILWAY PLAN LIMIT** (T017b/c): with a valid workspace token these were attempted via
+> the API/CLI, but the workspace is on the **Free/trial plan at its service cap (5/5: backend, Vault,
+> Redis, widget, Postgres)** — `railway add` returns *"Free plan resource provision limit exceeded."* The
+> `phoenix` schema was pre-created in prod Postgres; the services themselves need a **plan upgrade** (or a
+> freed slot) before they can be provisioned. After upgrading, create each from its `railway/*.toml`.
 - [ ] T017b [US1] **Dashboard Railway service not created** — `railway/dashboard.toml` exists but no
   `dashboard` service is running yet (operator-gated Streamlit on a separate, unadvertised URL). Create
   it: repo source, `railwayConfigFile=railway/dashboard.toml`, vars `VAULT_ADDR/VAULT_TOKEN`,
