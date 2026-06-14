@@ -132,13 +132,15 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
   `2be7d83`); (2) `railwayConfigFile` (toml) takes precedence over an instance-level startCommand override,
   and `serviceInstanceDeployV2` pins to the service's commit — so the deploy had to target the commit that
   carries the toml fix (deployed `commitSha=2be7d83`). Vault was unsealed + dashboard secrets present.
-- [ ] T017c [US1] **Phoenix Railway service not created** — `railway/phoenix.toml` exists but no `phoenix`
+- [X] T017c [US1] **Phoenix Railway service not created** — `railway/phoenix.toml` exists but no `phoenix`
   service is running yet. Backend var `PHOENIX_COLLECTOR_ENDPOINT` is still the stale `http://localhost:6006`
   (tracing is silently off — non-blocking, so `/health` is unaffected). Create the Phoenix service (image
   `arizephoenix/phoenix`, shared Postgres `phoenix` schema) and repoint `PHOENIX_COLLECTOR_ENDPOINT` at its
   private URL. **Superseded for prod by T017i** (LangSmith Cloud needs no Railway service); Phoenix remains
-  the local-dev default.
-- [ ] T017i [US1] **Swap prod tracing to LangSmith Cloud (no Railway service → no slot)** — the chosen
+  the local-dev default. — RESOLVED as **superseded by T017i**: the Phoenix Railway service is intentionally
+  **not** created for prod (LangSmith Cloud needs no slot). `arizephoenix/phoenix` (Arize Phoenix — the
+  self-hosted OTLP tracer; not Azure) stays the local-dev default via `TRACING_PROVIDER=phoenix`.
+- [X] T017i [US1] **Swap prod tracing to LangSmith Cloud (no Railway service → no slot)** — the chosen
   resolution to the Phoenix slot problem (T017c). Tracing now has a `TRACING_PROVIDER` selector:
   `phoenix` (self-hosted OTLP, default + local dev) or `langsmith` (LangSmith Cloud OTLP ingest). Both go
   through the **same redacting OTLP exporter**, so golden rule #5 (redaction-before-export) holds for the
@@ -149,6 +151,16 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
   `tests/unit/test_tracing_config.py`; lint + mypy + tests green. ⚠️ **PROD ACTIVATION (operator):** seed
   the real `LANGSMITH_API_KEY` into prod Vault, set backend var `TRACING_PROVIDER=langsmith` (+ optional
   `LANGSMITH_PROJECT`), redeploy. Decision/deviation recorded in `docs/DECISIONS.md` + `docs/SECURITY.md`.
+  — **PROD ACTIVATION DONE + VERIFIED:** prod backend vars are `TRACING_PROVIDER=langsmith` +
+  `LANGSMITH_PROJECT=souschef`; the real `LANGSMITH_API_KEY` (`lsv2_…`) is seeded in the (unsealed) prod
+  Vault at `secret/sous-chef`; the backend has redeployed since (`ef22202`, `6f7c92a`) so it booted with
+  this config. Verified live: a `POST /chat` turn succeeded and the LangSmith `souschef` project is
+  **receiving traces** (`GET /health`, `GET /recipes`, `PUT /profile`, … land in real time). ⚠️ **Known
+  limitation (not a tracing-config bug):** runs show **0 tokens / no cost** — the app's OTLP instrumentation
+  emits one generic span per HTTP request only (all `run_type=chain`, no `llm` runs); the Groq adapter
+  receives `usage` but never records it onto a span, so LangSmith has no token metadata to price. This is a
+  provider-independent instrumentation gap (Phoenix would show the same) → a future enhancement (emit an
+  `llm` span per LLM call with OTel GenAI `gen_ai.usage.*` attributes), out of 007 scope.
 
 ### 🟠 Known deviations / tech-debt from the live bring-up (reconcile vs the contracts/docs)
 > All four captured in [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) → **"Known deployment deviations (v0.1.0)"**.
