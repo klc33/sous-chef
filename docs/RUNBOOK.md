@@ -1,8 +1,19 @@
-# SousChef Runbook — Foundation
+# SousChef Runbook — v0.1.0
 
-Operational notes for the foundation skeleton: bring the local stack up, seed Vault, view traces in
-Phoenix, and deploy to Railway. Everything here maps to the quickstart scenarios
-([`specs/001-foundation/quickstart.md`](../specs/001-foundation/quickstart.md)).
+Operational notes for running and shipping SousChef: bring the local stack up, seed Vault, load the
+committed seed corpus, view traces, deploy to Railway, and cut the release. The full reproduce/deploy/release
+acceptance path is in [`specs/007-ship-public-deploy/quickstart.md`](../specs/007-ship-public-deploy/quickstart.md)
+(the original foundation scenarios live in
+[`specs/001-foundation/quickstart.md`](../specs/001-foundation/quickstart.md)).
+
+**The end-to-end path at a glance** (each step is detailed below):
+
+```
+LOCAL:  make up  →  make seed  →  make load-seed                         → demo
+DEPLOY: seed prod Vault (once) → unseal → alembic upgrade head (on boot)
+        → load_seed_corpus.py (first deploy) → /health 200 promotes      → demo on live URL
+RELEASE: rehearse demo on live URL + fresh-clone reproduce → tag v0.1.0
+```
 
 ## Bring the stack up (`make up`)
 
@@ -118,6 +129,44 @@ WHERE is_complete = true
   AND (category IS NULL
        OR id NOT IN (SELECT recipe_id FROM ingredients)
        OR id NOT IN (SELECT recipe_id FROM nutrition_cache));
+```
+
+## Load the committed seed corpus (`make load-seed`) — the canonical data path
+
+For local bring-up, a public deploy, and CI you do **not** run `make ingest` (which hits the source APIs).
+Instead you load the **committed seed corpus** under [`seeds/corpus/`](../seeds/corpus/) — a pre-built,
+categorized + embedded dataset (`recipes.jsonl` + `embeddings.npy` + `manifest.json`) — so local, CI, and
+prod hold **byte-identical** data and the demo never hits a cold corpus (FR-013). The load is **network-free**
+and **idempotent** (upsert on `source_id`) and makes **zero** provider calls. Contract:
+[contracts/seed-corpus.md](../specs/007-ship-public-deploy/contracts/seed-corpus.md).
+
+**Local — after `make up` + `make seed`:**
+
+```bash
+make load-seed     # runs `python -m scripts.load_seed_corpus` INSIDE the backend container
+```
+
+> Use `make load-seed`, **not** a host-side `uv run python scripts/load_seed_corpus.py`: `.env` points
+> `POSTGRES_URL` at the docker hostname `postgres`, which only resolves on the compose network. The loader
+> first validates `count` / `dim` / `manifest.embedding_model` against the **runtime** embeddings model and
+> **fails fast** on any mismatch (so seeded vectors and live query vectors always share one space), then
+> upserts rows + pgvector through the repo layer.
+
+**Prod — first deploy only** (after the backend's `alembic upgrade head` has run and Vault is unsealed):
+
+```bash
+# from a workstation with the prod POSTGRES_URL + embeddings key available, or via `railway run`:
+python -m scripts.load_seed_corpus
+```
+
+The committed artifact is regenerated offline (never in prod) by
+[`scripts/export_seed_corpus.py`](../scripts/export_seed_corpus.py) against a populated dev DB; `embeddings.npy`
+is tracked via **Git LFS** so it doesn't bloat the base repo.
+
+**Rebuild the classifier (offline, never shipped):**
+
+```bash
+make train         # → ml/artifacts/model.joblib (TF-IDF + LogReg; no torch). CI rebuilds this fresh.
 ```
 
 ## View traces (Phoenix self-hosted, or LangSmith Cloud)
@@ -407,3 +456,38 @@ dashboard's routing-split metric, which then reads an honest empty `0% / 0% / 0 
 > Local dev is unchanged: `docker-compose` still runs Redis and `make up` still sets `REDIS_URL`, so
 > `/health` reports redis and the routing-split metric works locally. Reversible — re-add `REDIS_URL`
 > (and a Redis service) to restore it.
+
+## Cut the release (`v0.1.0`)
+
+The release gate is a **rehearsal on both surfaces** before any tag (quickstart §F, SC-007):
+
+1. **Demo on the live URL** — open the widget at `https://widget-production-5547.up.railway.app`, run the
+   full scenario (chat → cards → verbatim steps → meal plan → shopping list → favorite) with an
+   allergy/diet constraint; confirm **zero** wall/grounding violations and a valid HTTPS certificate.
+2. **Reproduce on a fresh clone** — on a clean checkout: `make up` → `make seed` → `make load-seed`, then
+   run the same demo locally and confirm identical safety behavior (SC-006).
+3. **Tag the exact live + reproducible commit** and push it:
+
+   ```bash
+   git tag -a v0.1.0 -m "SousChef v0.1.0 — first public release"
+   git push origin v0.1.0
+   ```
+
+   The tag must point at the commit that is **both** running at the public URL **and** reproducible locally
+   — i.e. the green `main` Railway last auto-deployed (`git log origin/main -1`).
+
+## Failure recovery
+
+Quick triage for the failure modes seen during bring-up. Deviations behind these are detailed in *Known
+deployment deviations* above.
+
+| Symptom | Likely cause | Recovery |
+|---|---|---|
+| Backend `/health` 503 after a **Vault** redeploy | Vault re-sealed (1 share / threshold 1 — T017e) | `vault operator unseal` (or via the public operator endpoint), then re-check `/health`. Consider auto-unseal (cloud KMS). |
+| Backend won't boot: "could not load secrets" / seed-pointing `StartupConfigError` | prod Vault path `secret/sous-chef` not seeded, or a required key missing | run `scripts/seed_vault.sh` against the prod `VAULT_ADDR`/`VAULT_TOKEN` with real keys exported (FR-014). |
+| A non-backend service runs the backend's `alembic`/`/health` start command | service inherited the root `railway.toml` (T017g) | set that service's `railwayConfigFile` to its own `railway/<svc>.toml` (and `PORT=80` for the nginx widget). |
+| Vault container: `mkdir /vault/data/core: permission denied` | the 2.x image runs as non-root vs the root-owned Railway volume (T017d) | the prod Vault is pinned to `hashicorp/vault:1.13.3` (runs as root); keep the pin until the volume-ownership story improves. |
+| `load_seed_corpus.py` fails fast on a model/dim mismatch | the committed corpus was embedded with a different model than the runtime `EMBEDDINGS` model | align the runtime embeddings model to `manifest.embedding_model`, or re-export the corpus — **never** bypass the check (seeded and query vectors must share one space). |
+| `make load-seed` host-side: cannot resolve `postgres` | ran the loader on the host, where `.env`'s `POSTGRES_URL` points at the compose hostname | use `make load-seed` (runs inside the backend container). |
+| CI `gates` job red on red-team/redaction | a real safety regression (or an intentionally-added failing probe) | **fix the cause** — never weaken a threshold (golden rule #6). Revert the offending change; the merge is correctly blocked. |
+| Tracing shows nothing in prod | `TRACING_PROVIDER`/key not set | tracing is **non-blocking** (`/health` unaffected); to enable, seed `LANGSMITH_API_KEY` in Vault + set `TRACING_PROVIDER=langsmith` (see *View traces* above). |

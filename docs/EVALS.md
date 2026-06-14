@@ -110,7 +110,7 @@ Offline gates, run against the live stack (`make up` + `make ingest`, 2,224 reci
 [PASS] answer-relevancy      0.870          # report-only — never gates
 ```
 
-`make test`: **165 passed**. `make lint` (ruff + mypy): clean.
+`make test` (unit + integration + red-team): **226 tests**. `make lint` (ruff + mypy): clean.
 
 ## CI — the gates block merge (004)
 
@@ -130,6 +130,22 @@ and on `push: main`, as **two merge-blocking jobs** (plus the existing `ruff` / 
 A FAIL in either job blocks merge. To prove the gate bites: add an unrefused probe to
 `evals/redteam/attempts.yaml` (or nudge a metric below floor) → `gates` goes red → revert. Never weaken a
 threshold to make it pass (golden rule #6 / FR-010).
+
+## CI gate set in 007 — what is required, and the `evals-full` deviation
+
+The required status checks on branch-protected `main` are exactly four:
+**`ruff`, `mypy`, `gates`, `smoke`** — all **free and deterministic** (no provider calls). Railway
+auto-deploys only a green `main`, so "only a green main reaches production" holds (SC-002).
+
+**Deviation from [contracts/ci-gate.md](../specs/007-ship-public-deploy/contracts/ci-gate.md):** that
+contract lists an `evals-full` job (the provider-billed RAG hit@3/MRR + agent + report-only judge gates) as
+a required check. It was built and proven green, then **deleted per an operator cost decision** — the
+paid grades must **not** run on every PR/push. Those offline grades now run **locally only** via
+`make evals` (after `make up` + `make ingest`), on demand. The deterministic safety/quality gates that
+actually protect `main` (classifier macro-F1, **red-team refusal = 1.0**, **redaction leaks = 0**, plus the
+full pytest suite in `smoke`) remain required in CI and call no provider. Recorded as a deviation in
+[DECISIONS.md](DECISIONS.md) / [RUNBOOK.md](RUNBOOK.md); the unused `GROQ_API_KEY` / `EMBEDDINGS_API_KEY`
+Actions secrets are harmless to leave (encrypted at rest) for a future on-demand evals workflow.
 
 ## Success-criteria → gate map
 

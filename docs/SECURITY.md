@@ -144,6 +144,50 @@ cook-facing output path** — so an operator's `UPDATE` to that column is filter
 construction. Verified by the wall-regression suite (which enumerates `/recipes`, `/recipes/{id}`, `/chat`):
 a manual data change can change *which* recipes exist, never whether an unsafe one can surface.
 
+## 7. Deployment security — the secrets split & the limited public surface (007)
+
+Shipping to a public URL adds two security properties, both enforced by topology rather than trust.
+
+### 7a. The three-way secrets split (FR-004/005/006, SC-004)
+
+Every value the running system needs falls into **exactly one** of three homes — **nothing secret is ever a
+Railway variable, and no secret is ever in the repo, an image, or `.env`** (golden rule #4). Full keyspace
+in [contracts/secrets-keyspace.md](../specs/007-ship-public-deploy/contracts/secrets-keyspace.md) and
+[data-model.md](../specs/007-ship-public-deploy/data-model.md) §2.
+
+| Home | What lives here | Examples | Rule |
+|---|---|---|---|
+| **Vault** (`secret/sous-chef`, KV v2) | **all application secrets** — the only home | `GROQ_API_KEY`, `EMBEDDINGS_API_KEY`, `OPENAI_API_KEY`, `LANGSMITH_API_KEY`, `OPERATOR_PASSWORD_HASH`, `DASHBOARD_COOKIE_KEY`, `ADMIN_API_TOKEN`, `app_secret` | seeded once by [scripts/seed_vault.sh](../scripts/seed_vault.sh) into the persistent prod Vault; read at startup |
+| **Platform-injected** | managed **datastore credentials** | `POSTGRES_URL` (Postgres plugin), `REDIS_URL` (Redis plugin, optional) | provided by Railway's managed plugins — never hand-set, never in Vault |
+| **Railway variables** | **bootstrap + non-secret only** | `ENV`, `VAULT_ADDR`, `VAULT_TOKEN`, `TRACING_PROVIDER`, `LANGSMITH_PROJECT` (name), `WIDGET_ORIGINS`, `BACKEND_ADMIN_URL`, `OPERATOR_USERNAME`, `VITE_API_BASE` | non-secret config selectors |
+
+The **one** deliberate nuance: `VAULT_TOKEN` is a real `hvs.`-shaped token living as a Railway variable.
+This is **contract-allowed by design** — it is the chicken-and-egg bootstrap credential the backend needs
+*to reach* Vault, so it cannot itself live in Vault. It is bootstrap, not an application secret.
+
+**Proven, not asserted (SC-004):** a repo + image key-shape scan (`gsk_…` / `sk-…` / `hvs.…` / hardcoded
+`*_API_KEY=<literal>`, excluding test fixtures + prose) returns **zero real secrets**; the only hits are the
+deliberately-fake redaction fixtures. **Fail-fast** is locked by [tests/unit/test_vault.py](../tests/unit/test_vault.py):
+remove any required secret (or hit an unseeded Vault path) and `VaultAdapter.load_secrets()` raises
+`StartupConfigError` with a seed-pointing message — the backend never boots silently degraded (FR-004/FR-014).
+
+### 7b. The limited public surface (FR-001/FR-001a)
+
+Only **two** services are reachable on the advertised public URL: the cook **`widget`** (static SPA) and the
+**`backend` API** it calls. Everything else is private or unadvertised:
+
+- **`dashboard`** (Streamlit operator console) and **tracing** (self-hosted Phoenix, or LangSmith Cloud)
+  live on **separate, unadvertised URLs**, operator-gated (the dashboard behind `streamlit-authenticator`
+  cookie login keyed from Vault, §5). They are deployed but never linked from the public app.
+- **Postgres, Redis, and Vault** have **no public ingress** — private network only.
+- The **public widget holds no operator token** and cannot reach `/admin/*` (§5, FR-029); the cook and
+  operator surfaces share the monolith but not the trust level.
+
+**Accepted deviation (v0.1.0):** the prod **Vault** keeps a public HTTPS endpoint *only* for operator
+init/unseal/seed — it is sealed-by-default and root-token-gated, and the backend reaches it over the private
+network. To be removed once auto-unseal (cloud KMS) lands. Documented in [RUNBOOK.md](RUNBOOK.md) → *Known
+deployment deviations*.
+
 ## Success-criteria coverage
 
 | Criterion | Mechanism | Gate |
@@ -159,3 +203,5 @@ a manual data change can change *which* recipes exist, never whether an unsafe o
 | 005 SC-006 OpenAI key / pgAdmin pw never leak | `OPENAI_API_KEY` in Vault; pgAdmin pw local-only placeholder; redaction before log + span | `redaction.leak_count_max: 0` |
 | 005 SC-008 pgAdmin absent from the deploy | `local` compose profile + backend-only `railway.toml` | `railway.toml` (no `pgadmin` service) |
 | 005 FR-018 manual pgAdmin edit can't bypass the wall | guard reads `recipes.allergens` fresh at query time | `tests/integration/test_wall_regression.py` |
+| 007 SC-004 zero app secrets in repo/image; Vault-only; datastore creds platform-injected | three-way secrets split (§7a); fail-fast on a missing secret | repo/image key-shape scan + `tests/unit/test_vault.py` |
+| 007 FR-001/001a limited public surface | only widget + backend public; dashboard/tracing operator-gated/unadvertised; datastores private (§7b) | deployment topology ([data-model.md](../specs/007-ship-public-deploy/data-model.md) §1) |

@@ -1,8 +1,23 @@
+# Decisions
+
+Architecture decision records, organized by the feature that introduced them. Each entry states the
+decision, the alternatives weighed, and why — **backed by a concrete number** wherever one exists.
+Constitution principles are cited as `P#`.
+
+**The three decisions a reviewer is most likely to ask about, each with its supporting number:**
+
+| Decision | Where | Number |
+|---|---|---|
+| **ML vs. LLM** for intent routing | **D1** | classifier macro-F1 **0.979** (held-out) |
+| **Chunking** strategy for retrieval | **D12** | RAG hit@3 **1.000**, MRR **0.933** (no chunking) |
+| **Agent vs. workflow** for handling a turn | **D7** | agent-tool-selection **0.667** (advisory), escalation threshold **0.55** |
+
+---
+
 # Decisions — 003 Intelligent Behavior
 
 Architecture decision records for the intelligent layer (smart retrieval, freshness, planning, the
-guarded agent). Each entry states the decision, the alternatives weighed, and why. Constitution
-principles are cited as `P#`.
+guarded agent).
 
 ## D1 — Intent routing: a trained classical model, not an LLM router
 
@@ -91,6 +106,16 @@ capped by `agent_max_iterations` (default 5) + a token budget, returning the bes
 **Why.** Exactly one agent (P1); every tool input is Pydantic-validated and every recipe output passes
 the `recipe_view` wall choke point (P3, P6, SC-007). Bounds make the loop always terminate; a degraded
 tool choice never produces an unsafe recipe because the wall is downstream of the tool.
+
+**Numbers (agent-vs-workflow split).** The route is the **classifier's** call (D1, macro-F1 **0.979**):
+high-confidence easy intents take the deterministic **workflow** path; only turns below the escalation
+threshold (`router_confidence_threshold`, default **0.55**) plus the inherently hard/multi-step intents
+reach the **agent**. So the agent runs on the *minority* of turns by design — the cheap, deterministic
+workflow is the common path. Agent quality is tracked by the **advisory** agent-tool-selection eval
+(**0.667 = 4/6** on 2026-06-11; no hard threshold — tool choice degrades quality, never safety, SC-007),
+and the live **workflow-vs-agent routing split** is instrumented as a Redis counter surfaced on the
+operator dashboard (`router.record_decision`). Picking a trained classifier as the router (vs. an LLM
+router) keeps this split decision free, fast, and deterministic.
 
 ## D8 — Deterministic guardrails before routing and before the reply leaves
 
@@ -212,3 +237,30 @@ fallback in [dashboardxphoneix.md](../dashboardxphoneix.md) §C.2). (b) **Phoeni
 auth-header requirement as LangSmith, so no simpler; LangSmith chosen for its free developer tier + OTLP
 support. (c) **No prod tracing** — acceptable (tracing is non-blocking) but loses the observability story a
 reviewer expects; the selector makes real tracing essentially free to enable.
+
+## D12 — No chunking: one embedding vector per whole recipe
+
+**Decision.** Recipes are **not chunked**. Each recipe is embedded as a single document (title +
+ingredients + steps, joined) into one `recipes.embedding vector(1536)` row (D2), and retrieval ranks whole
+recipes by cosine similarity. There is no splitter, no per-chunk vector table, and no chunk-to-document
+reassembly step.
+
+**Numbers.** On the labeled golden set (`evals/rag/golden.yaml`) against the embedded corpus (2,224
+recipes) the whole-recipe vectors score **hit@3 = 1.000 (10/10)** and **MRR = 0.933** (2026-06-11) — the
+cook reliably sees an ideal recipe in the top-3, so chunking would add machinery and a reassembly seam for
+no measurable retrieval gain. Both floors are pinned at a conservative **0.80** in
+[eval_thresholds.yaml](../eval_thresholds.yaml) and never weakened (golden rule #6).
+
+**Why.** Chunking exists to retrieve a *passage* from a long document; a recipe is **already the unit of
+retrieval and of the answer** — the cook wants a whole recipe, not a fragment of one, and the detail view
+renders the recipe's stored steps **verbatim** (D6, grounding). A recipe is short enough to embed whole, so
+one vector per recipe keeps the index 1:1 with the `recipes` table — the over-fetch-then-wall-trim pipeline
+(D4) operates on whole rows, and freshness/category/diet pre-filters (D5) are plain `WHERE` clauses on the
+same row (P1, P3). It also keeps the embedding space aligned 1:1 with the committed seed corpus
+(`recipes.jsonl` ↔ `embeddings.npy`, one row each), which is what makes the seed artifact reproducible.
+
+**Alternatives rejected.** (a) **Per-step or fixed-window chunking** — would return a step out of context,
+fight grounding (the cook needs the whole recipe), and force a chunk→recipe reassembly + dedup layer for no
+hit@3 improvement on this corpus. (b) **A separate chunk vector table** — extra schema, extra writes, extra
+join, and a second thing to keep in sync with the seed corpus; rejected as unjustified complexity (P1,
+P10).
