@@ -111,11 +111,14 @@ these block the MVP cook journey (live + allergen-wall-verified), but each is re
   contradictions**, oxtail dishes non-vegan. The wall re-reads these at query time, so it is **live**.
 
 ### 🟡 Incomplete deployment surface (configs written, live services not yet created)
-> ⛔ **BLOCKED ON RAILWAY PLAN LIMIT** (T017b/c): with a valid workspace token these were attempted via
-> the API/CLI, but the workspace is on the **Free/trial plan at its service cap (5/5: backend, Vault,
-> Redis, widget, Postgres)** — `railway add` returns *"Free plan resource provision limit exceeded."* The
-> `phoenix` schema was pre-created in prod Postgres; the services themselves need a **plan upgrade** (or a
-> freed slot) before they can be provisioned. After upgrading, create each from its `railway/*.toml`.
+> ⛔ **WAS BLOCKED ON RAILWAY PLAN LIMIT** (T017b/c): the workspace is on the **Free/trial plan at its
+> service cap (5/5: backend, Vault, Redis, widget, Postgres)** — `railway add` returns *"Free plan resource
+> provision limit exceeded."* The `phoenix` schema was pre-created in prod Postgres.
+> ✅ **Slot path for T017b (dashboard):** **Redis is now optional** (`REDIS_URL` unset → no cache, `/health`
+> drops the redis check; its only use was the dashboard's best-effort routing-split metric). So the `Redis`
+> service can be deleted to free a slot for the `dashboard` with **zero cook-journey impact** — see
+> [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) → *"Redis is optional…"* and [`dashboardxphoneix.md`](../../dashboardxphoneix.md) §C.1/§D.
+> Phoenix (T017c) still needs a second slot (move the widget off Railway, §C.2) or a plan upgrade.
 - [ ] T017b [US1] **Dashboard Railway service not created** — `railway/dashboard.toml` exists but no
   `dashboard` service is running yet (operator-gated Streamlit on a separate, unadvertised URL). Create
   it: repo source, `railwayConfigFile=railway/dashboard.toml`, vars `VAULT_ADDR/VAULT_TOKEN`,

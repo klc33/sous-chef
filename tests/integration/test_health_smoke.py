@@ -33,3 +33,14 @@ async def test_health_dependency_down_returns_503(make_client) -> None:
     assert body["dependencies"]["redis"] == "unreachable"
     assert body["dependencies"]["postgres"] == "ok"
     assert body["dependencies"]["vault"] == "ok"
+
+
+async def test_health_without_redis_omits_it_and_stays_200(make_client) -> None:
+    """Redis-optional deploy: with no cache wired, /health omits redis and is still 200 (no false 503)."""
+    async with make_client(postgres=True, redis=None, vault=True) as client:
+        resp = await client.get("/health")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert set(body["dependencies"]) == {"postgres", "vault"}  # redis not reported when absent

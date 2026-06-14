@@ -39,16 +39,19 @@ class FakeSettings:
     version: str = "0.1.0"
 
 
-def build_test_app(*, postgres: bool = True, redis: bool = True, vault: bool = True) -> FastAPI:
+def build_test_app(
+    *, postgres: bool = True, redis: bool | None = True, vault: bool = True
+) -> FastAPI:
     """Construct a FastAPI app with the health router and fake adapters on app.state.
 
     Each dependency's reachability is set independently so a test can drive the healthy path or
-    a specific degraded path deterministically.
+    a specific degraded path deterministically. `redis=None` wires NO cache at all (the Redis-optional
+    deployment), so /health omits redis rather than reporting it.
     """
     app = FastAPI()
     app.state.settings = FakeSettings()
     app.state.db = FakePinger(postgres)
-    app.state.cache = FakePinger(redis)
+    app.state.cache = None if redis is None else FakePinger(redis)
     app.state.vault = FakePinger(vault)
     register_error_handlers(app)
     register_health_router(app)
@@ -133,7 +136,7 @@ def make_client() -> Callable[..., AsyncClient]:
     dependency's ping() result.
     """
 
-    def _factory(**reachability: bool) -> AsyncClient:
+    def _factory(**reachability: bool | None) -> AsyncClient:
         app = build_test_app(**reachability)
         transport = ASGITransport(app=app)
         return AsyncClient(transport=transport, base_url="http://test")

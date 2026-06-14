@@ -55,7 +55,11 @@ class Settings(BaseSettings):
 
     # Backing-service locations (not credentials).
     postgres_url: str
-    redis_url: str
+    # Redis is OPTIONAL. Its only product use is the operator dashboard's best-effort routing-split
+    # counter (router.record_decision → admin metrics), which already no-ops when the cache is absent.
+    # When REDIS_URL is unset the app runs with no cache and /health drops the redis check, so the Redis
+    # service can be removed to free a Railway slot without touching the cook journey. See docs/RUNBOOK.md.
+    redis_url: str | None = Field(default=None)
 
     # Tracing collector endpoint (Phoenix). Optional: when unset/empty, tracing is disabled and the
     # app runs untraced. Export is best-effort and must never block startup or requests, so a deploy

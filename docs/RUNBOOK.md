@@ -356,3 +356,35 @@ A Railway service whose repo has a **root `railway.toml`** inherits it **unless*
 nginx. **Every non-backend service must set its own `railwayConfigFile`** — the `dashboard` and `phoenix`
 services (T017b/T017c) must each point at [`railway/dashboard.toml`](../railway/dashboard.toml) /
 [`railway/phoenix.toml`](../railway/phoenix.toml) to avoid the same trap.
+
+## Redis is optional — remove it to free a Railway service slot
+
+Redis has **one** product use: the operator dashboard's workflow-vs-agent **routing-split counter**
+(`router.record_decision` increments `routing:agent`/`routing:workflow`; the dashboard's metrics page reads
+them). That path is already **best-effort** — it no-ops when the cache is absent — and Redis is used for
+nothing else (no caching, sessions, freshness/seen-history [Postgres], retrieval, the agent, or the wall).
+
+As of this change `REDIS_URL` is **optional** ([`app/config.py`](../app/config.py)): when it is unset the
+app builds **no cache**, and `/health` **omits** the redis check instead of 503-ing on it
+([`app/main.py`](../app/main.py), [`app/api/health.py`](../app/api/health.py)). So on a capacity-limited
+plan (e.g. Railway's free/trial 5-service cap) the `Redis` service can be deleted to free a slot — e.g. for
+the operator `dashboard` — with **zero effect on the cook journey**. The only visible loss is the
+dashboard's routing-split metric, which then reads an honest empty `0% / 0% / 0 turns`.
+
+**Procedure (Railway):**
+
+1. Deploy this code first (so the backend can run cache-less): merge to `main`.
+2. **Remove the `REDIS_URL` variable** from the `sous-chef` service (Variables → delete `REDIS_URL`).
+   This redeploys the backend; `/health` now reports only `postgres` + `vault` and stays `200`.
+   ```bash
+   railway variables --service sous-chef --remove REDIS_URL   # or delete it in the dashboard UI
+   ```
+3. Verify health is green without redis:
+   ```bash
+   curl -s https://<backend>.up.railway.app/health   # dependencies = {postgres, vault}, status "ok"
+   ```
+4. **Delete the `Redis` service** (Service → Settings → Delete). The slot is now free for `dashboard`.
+
+> Local dev is unchanged: `docker-compose` still runs Redis and `make up` still sets `REDIS_URL`, so
+> `/health` reports redis and the routing-split metric works locally. Reversible — re-add `REDIS_URL`
+> (and a Redis service) to restore it.

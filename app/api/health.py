@@ -1,8 +1,9 @@
-"""GET /health — readiness over the critical dependencies (Postgres, Redis, Vault).
+"""GET /health — readiness over the critical dependencies (Postgres, Vault, and Redis when configured).
 
-Returns 200 + a per-dependency map only when ALL are reachable; 503 when any is unreachable —
-never a false-healthy 200 (SC-002). The adapters are read from app.state, so the same router
-serves both the deployed app (real adapters) and tests (fakes). Response matches
+Returns 200 + a per-dependency map only when ALL wired dependencies are reachable; 503 when any is
+unreachable — never a false-healthy 200 (SC-002). Redis is OPTIONAL (config.redis_url): when no cache is
+wired it is omitted from the map and does not gate health. The adapters are read from app.state, so the
+same router serves both the deployed app (real adapters) and tests (fakes). Response matches
 contracts/health.openapi.yaml.
 """
 
@@ -30,9 +31,13 @@ def _evaluate(request: Request) -> tuple[int, dict[str, Any]]:
     state = request.app.state
     deps = {
         "postgres": state.db.ping(),
-        "redis": state.cache.ping(),
         "vault": state.vault.ping(),
     }
+    # Redis is optional (config.redis_url): only gate on it when a cache is actually wired. With no cache
+    # the service runs Redis-less, so /health must not report it unreachable and must not 503 on its absence.
+    cache = getattr(state, "cache", None)
+    if cache is not None:
+        deps["redis"] = cache.ping()
     all_ok = all(deps.values())
     body: dict[str, Any] = {
         "status": "ok" if all_ok else "unhealthy",

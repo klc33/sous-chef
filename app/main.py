@@ -41,9 +41,10 @@ def create_app() -> FastAPI:
     vault.load_secrets()
     log.info("vault.secrets_loaded")
 
-    # Build the DB and cache adapters (connections are opened lazily / on first use).
+    # Build the DB adapter (connections open lazily). The cache is OPTIONAL: only built when REDIS_URL is
+    # configured — without it the app runs cache-less (the routing-split metric simply reports empty).
     db = Database(settings.postgres_url)
-    cache = Cache(settings.redis_url)
+    cache = Cache(settings.redis_url) if settings.redis_url else None
 
     # Configure tracing → Phoenix (redacted, best-effort: None means run untraced).
     tracer = configure_tracing(settings)
@@ -56,7 +57,8 @@ def create_app() -> FastAPI:
             yield
         finally:
             db.dispose()
-            cache.close()
+            if cache is not None:
+                cache.close()
             log.info("shutdown")
 
     app = FastAPI(title="SousChef Foundation API", version=settings.version, lifespan=lifespan)
