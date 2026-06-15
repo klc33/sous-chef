@@ -1,6 +1,23 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 1.0.0 → 2.0.0
+Amendment rationale (2.0.0): Redefinition of Principle X — the blanket prohibition on "full end-user
+  authentication" is LIFTED. Per an explicit product decision (feature 008), the application is now gated
+  behind **admin-provisioned login accounts** (no self-service registration); a logged-in user (cook) owns
+  their diet/allergy profile, favorites, and seen-history. This is a backward-incompatible governance change
+  (redefinition of a principle's prohibition), so MAJOR per the versioning policy.
+  Changes: Principle X (prohibition reworded — self-service signup remains banned; admin-provisioned auth
+  allowed); Principle VI effect (chat is now authenticated, still treated as untrusted); Technology & Stack
+  Constraints (PyJWT + bcrypt added for authentication); new section "Account & Authentication Model".
+  Decision: TWO separate account systems — feature 008 stays operator-console only (operator_accounts,
+  dashboard); a NEW feature 009 adds admin-managed COOK accounts (cook_accounts, widget) that own the
+  diet/allergy profile, favorites, and seen-history, replacing the passwordless X-Profile-ID and gating the
+  app behind cook login.
+  Templates/docs requiring follow-up sync: CLAUDE.md ("Cook identity is a passwordless profile-ID" convention
+  + architecture flow) MUST be updated to the account model. (Tracked; applied alongside the feature 009 work.)
+
+--- Original 1.0.0 ratification report retained below ---
 Version change: (template, unversioned) → 1.0.0
 Bump rationale: Initial ratification of the Sous-Chef constitution from the template.
   First concrete adoption of all principles and governance, so MAJOR baseline 1.0.0.
@@ -78,11 +95,12 @@ Alembic migrations. Dependencies are pinned (uv lockfile). Eval thresholds are c
 repo. The served classifier model is SHA-pinned. "Works on my laptop" disqualifies a change.
 
 ### VI. Security & Privacy by Default
-Safe is the default; you opt into exposure, never into protection. The chat box is public, untrusted
-input and cooks paste personal data. Therefore: all secrets live in Vault (never in `.env`, code, or
-images); PII redaction runs before logs AND before any trace span is emitted; guardrails screen
-input and output; all database access uses parameterized queries / ORM (injection-safe); the agent
-loop is bounded in iterations and tokens.
+Safe is the default; you opt into exposure, never into protection. The chat box accepts untrusted input
+(now behind admin-provisioned login) and cooks paste personal data. Therefore: all secrets live in Vault
+(never in `.env`, code, or images); PII redaction runs before logs AND before any trace span is emitted;
+guardrails screen input and output; all database access uses parameterized queries / ORM (injection-safe);
+the agent loop is bounded in iterations and tokens; passwords are stored only as one-way hashes and sessions
+are carried by a signed token whose key lives in Vault.
 
 ### VII. Maintainability
 Code MUST be readable, consistent, and changeable by a newcomer, because the author must answer for
@@ -102,8 +120,12 @@ coding: every line is generated against a reviewed task and owned by the author.
 ### X. No Unnecessary Technologies or Features
 Every technology MUST earn its place by solving a stated problem. Résumé-driven dependencies bloat
 the build and the attack surface. Specifically prohibited: `torch`/`transformers` in any container;
-any dedicated vector database; Kubernetes; blob storage; full end-user authentication. Adding a
-dependency requires a requirement behind it.
+any dedicated vector database; Kubernetes; blob storage; and **self-service end-user registration**
+(accounts are **admin-provisioned only** — see *Account & Authentication Model*). Adding a dependency
+requires a requirement behind it.
+> *Amended in 2.0.0:* the prior blanket ban on "full end-user authentication" is lifted. The application is
+> now gated behind admin-created login accounts; what remains prohibited is **self-service signup** and any
+> auth technology beyond the approved set.
 
 ## Non-Negotiable Safety Invariants
 
@@ -125,12 +147,25 @@ These invariants are absolute and override convenience, performance, or feature 
 The approved stack is the lean set required by the principles above: FastAPI + Pydantic; PostgreSQL
 with pgvector; Redis; HashiCorp Vault; Groq (chat-only LLM) with embeddings from a separate hosted
 provider; scikit-learn + joblib for the classifier; deterministic in-process guardrails (regex
-input/output rails — no framework dependency) + Presidio for PII; Arize Phoenix (self-hosted,
-OpenTelemetry) for tracing; React + plain JavaScript/JSX
+input/output rails — no framework dependency) + Presidio for PII; **PyJWT + bcrypt for
+admin-provisioned authentication** (signed-token sessions + one-way password hashing); Arize Phoenix
+(self-hosted, OpenTelemetry) for tracing; React + plain JavaScript/JSX
 (no TypeScript) for the widget; Streamlit + streamlit-authenticator for the dashboard; Docker /
 docker-compose; Railway for deployment; SpecKit for the lifecycle. Python dependencies are managed
 with `uv` only (never `pip`), grouped so each image stays lean, and no image contains `torch`.
 Introducing any technology outside this set requires a constitution amendment.
+
+## Account & Authentication Model
+
+*(Added in 2.0.0.)* Access to the application is gated behind login. Accounts are **admin-provisioned
+only** — there is no self-service registration anywhere. Each account has a role (at minimum `admin` and
+`user`): an `admin` creates, lists, deactivates/reactivates, and resets accounts; a `user` (cook) signs in
+and uses the app. A logged-in user **owns their state** — diet/allergy profile, favorites, and seen-history
+are keyed to the account, not to a passwordless header. Passwords are stored only as one-way (bcrypt) hashes;
+sessions are carried by a signed token (JWT) whose signing key lives in Vault; deactivation revokes access.
+The safety invariants are unchanged and still apply to every authenticated user: the wall holds, generation
+stays grounded, redaction runs before logs/traces. *(This supersedes the prior "passwordless profile-ID"
+identity; CLAUDE.md and feature specs are updated to match.)*
 
 ## Development Workflow & Quality Gates
 
@@ -159,4 +194,4 @@ Compliance is reviewed at every SpecKit stage gate and at code review. Runtime d
 for agents lives in `CLAUDE.md`, which MUST stay consistent with this constitution; if they conflict,
 this constitution wins and `CLAUDE.md` is corrected.
 
-**Version**: 1.0.0 | **Ratified**: 2026-06-08 | **Last Amended**: 2026-06-08
+**Version**: 2.0.0 | **Ratified**: 2026-06-08 | **Last Amended**: 2026-06-15
