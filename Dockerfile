@@ -16,11 +16,10 @@ RUN apt-get update \
 
 # 1) Dependency layer (cached): resolve ONLY the backend extra from the frozen lockfile,
 #    without installing the project source yet, so this layer is reused across code changes.
-#    The uv wheel cache is a BuildKit cache mount (not a layer), so the downloaded wheels never
-#    bloat the image — only the resolved /srv/.venv lands in the layer (golden rule #3).
+#    (A BuildKit cache mount would keep the uv wheel cache out of the image, but Railway's builder
+#    rejects cache-mount ids without its proprietary cacheKey prefix — see RUNBOOK image-size note.)
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --extra backend
+RUN uv sync --frozen --no-install-project --no-dev --extra backend
 
 # 2) App layer: copy the source the backend actually needs, then finalize the environment.
 COPY app ./app
@@ -44,8 +43,7 @@ COPY eval_thresholds.yaml ./
 # so local == prod data (FR-013). embeddings.npy is a Git LFS object: CI must `git lfs pull` before the
 # build, or this copies the pointer file and the loader fails fast on the dim/count check.
 COPY seeds ./seeds
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra backend
+RUN uv sync --frozen --no-dev --extra backend
 
 ENV PATH="/srv/.venv/bin:$PATH"
 EXPOSE 8000
