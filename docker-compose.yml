@@ -71,15 +71,15 @@ services:
       retries: 10
 
   # Operator console (US3). Its own lean image (dashboard extra only — streamlit/authenticator/httpx/
-  # pandas, no backend libs). Reads operator secrets from Vault over HTTP and drives the backend /admin/*
-  # API with the Vault-issued admin token; never touches the DB directly. Depends on the backend because
-  # the backend's start command is what seeds Vault (scripts/seed_vault.sh) with the operator secrets.
+  # pandas, no backend libs). Reads the cookie-signing key from Vault over HTTP and drives the backend
+  # /admin/* API with the per-user JWT it obtains from the backend login; never touches the DB directly.
+  # Depends on the backend because the backend's start command is what seeds Vault (scripts/seed_vault.sh).
   dashboard:
     build:
       context: .
       dockerfile: dashboard/Dockerfile
     env_file:
-      - .env          # BACKEND_ADMIN_URL, OPERATOR_USERNAME, VAULT_ADDR, VAULT_TOKEN (all non-secret)
+      - .env          # BACKEND_ADMIN_URL, VAULT_ADDR, VAULT_TOKEN (all non-secret)
     ports:
       - "8501:8501"
     depends_on:

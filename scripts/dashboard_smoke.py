@@ -13,7 +13,6 @@ import sys
 os.environ.setdefault("VAULT_ADDR", "http://localhost:8200")
 os.environ.setdefault("VAULT_TOKEN", "root")
 os.environ.setdefault("BACKEND_ADMIN_URL", "http://localhost:8000")
-os.environ.setdefault("OPERATOR_USERNAME", "operator")
 
 # Streamlit puts the main script's dir on sys.path at runtime; mimic that so `from auth import ...` works.
 sys.path.insert(0, os.path.abspath("dashboard"))

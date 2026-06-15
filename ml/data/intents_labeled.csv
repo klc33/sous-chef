@@ -253,3 +253,13 @@ what's trending on social media,out_of_scope
 explain the rules of chess,out_of_scope
 who wrote Romeo and Juliet,out_of_scope
 what's the best phone to buy,out_of_scope
+fish,find_recipe
+fish for dinner,find_recipe
+a fish dinner,find_recipe
+show me a fish recipe,find_recipe
+something with fish,find_recipe
+grilled fish,find_recipe
+baked fish ideas,find_recipe
+easy fish dish,find_recipe
+white fish recipe,find_recipe
+fish curry,find_recipe

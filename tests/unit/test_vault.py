@@ -68,7 +68,12 @@ _FULL_SECRETS = {
     "app_secret": "x",
     "GROQ_API_KEY": "g",
     "EMBEDDINGS_API_KEY": "e",
-    "ADMIN_API_TOKEN": "t",
+    # The backend-mandatory operator-account secrets (008): JWT signing key + bootstrap admin password.
+    "JWT_SIGNING_KEY": "s",
+    "BOOTSTRAP_ADMIN_PASSWORD": "p",
+    # The backend-mandatory cook-account secrets (009): cook-session signing key + demo-cook password.
+    "COOK_SESSION_KEY": "c",
+    "DEMO_COOK_PASSWORD": "d",
 }
 
 
@@ -77,7 +82,7 @@ def test_load_secrets_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _adapter_with(monkeypatch, _FakeClient(data=dict(_FULL_SECRETS)))
     adapter.load_secrets()
     assert adapter.get("GROQ_API_KEY") == "g"
-    assert adapter.get("ADMIN_API_TOKEN") == "t"
+    assert adapter.get("JWT_SIGNING_KEY") == "s"
 
 
 def test_unauthenticated_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,11 +99,17 @@ def test_unseeded_path_points_at_seed(monkeypatch: pytest.MonkeyPatch) -> None:
         adapter.load_secrets()
 
 
-def test_missing_required_admin_token_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Removing the required ADMIN_API_TOKEN secret fails startup rather than booting unguarded."""
-    partial = {k: v for k, v in _FULL_SECRETS.items() if k != "ADMIN_API_TOKEN"}
+@pytest.mark.parametrize(
+    "missing",
+    ["JWT_SIGNING_KEY", "BOOTSTRAP_ADMIN_PASSWORD", "COOK_SESSION_KEY", "DEMO_COOK_PASSWORD"],
+)
+def test_missing_required_backend_secret_fails_fast(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    """Removing any backend-mandatory account secret fails startup rather than booting unguarded (008/009)."""
+    partial = {k: v for k, v in _FULL_SECRETS.items() if k != missing}
     adapter = _adapter_with(monkeypatch, _FakeClient(data=partial))
-    with pytest.raises(StartupConfigError, match="ADMIN_API_TOKEN"):
+    with pytest.raises(StartupConfigError, match=missing):
         adapter.load_secrets()
 
 

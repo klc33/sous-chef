@@ -84,6 +84,19 @@ _MEAT_POULTRY = (
     "oxtail", "brisket", "pancetta", "guanciale", "mortadella", "andouille",
     "kielbasa", "bratwurst", "frankfurter", "foie", "escargot", "snail",
     "quail", "pheasant", "rabbit", "tripe",
+    # Poultry synonyms a recipe may use instead of "chicken" (the "broiler reads as vegan" case).
+    "broiler", "poussin", "capon",
+)
+
+# Title phrases that mark a dish as deliberately MEAT-FREE even though it names a meat ("vegetarian
+# sausage", "meatless meatballs", "mock duck", "facon"). When the title matches one of these we trust the
+# ingredient-derived flags and skip the title meat/fish backstop below, so a genuinely veg dish named
+# after meat is not hidden from the people who want it. Checked BEFORE the meat test so "meatless" /
+# "meat-free" (which contain the "meat" substring) are not themselves read as meat.
+_VEG_TITLE_MARKERS = (
+    "vegetarian", "vegan", "veggie", "meat-free", "meat free", "meatless",
+    "plant-based", "plant based", "no meat", "without meat", "mock", "facon",
+    "meat substitute", "meat-substitute",
 )
 # Meat/animal-fat terms matched as WHOLE words, not substrings — for names that are a substring of a
 # safe food. "lard" (pork/beef fat) is the motivating case: a bare substring match would wrongly flag
@@ -178,7 +191,7 @@ def _keyword_allergens(name: str) -> set[Allergen]:
 
 
 def derive_diet_flags(
-    per_ingredient: list[tuple[str, set[Allergen]]], certain: bool
+    per_ingredient: list[tuple[str, set[Allergen]]], certain: bool, title: str = ""
 ) -> dict[str, bool]:
     """Derive the three diet flags from each ingredient's (name, final allergen tags) + recipe certainty.
 
@@ -187,6 +200,13 @@ def derive_diet_flags(
     the bug where an OFF-only milk tag left a recipe flagged vegan). Meat/poultry and honey carry no top-9
     allergen, so they stay name-keyword signals. Uncertainty forces every flag False so stricter diets fail
     closed. Shared by `analyze()` (live ingest) and the seed-corpus regenerator so both stay identical.
+
+    The `title` is a fail-closed backstop for proteins the ingredient list misses or renames: some sources
+    omit the headline meat from the ingredient rows (a "pork belly" whose ingredients are only the rub/
+    marinade) or list it unconventionally, which would otherwise read as vegetarian. A meat word in the
+    TITLE forces meat-bearing diets closed; a fish/shellfish word forces vegetarian/vegan closed (but not
+    pescatarian, which allows seafood). A title flagged meat-free (`_VEG_TITLE_MARKERS`) is exempt so a
+    deliberately veg dish named after meat keeps its ingredient-derived flags.
     """
     has_meat_poultry = any(_is_meat(name) for name, _ in per_ingredient)
     has_seafood = any(
@@ -195,6 +215,14 @@ def derive_diet_flags(
     has_dairy = any(Allergen.MILK in tags for _, tags in per_ingredient)
     has_eggs = any(Allergen.EGGS in tags for _, tags in per_ingredient)
     has_other_non_vegan = any(_matches(name, _NON_VEGAN_OTHER) for name, _ in per_ingredient)
+
+    # Title backstop — only when the title is not explicitly meat-free.
+    title_l = title.lower()
+    if not _matches(title_l, _VEG_TITLE_MARKERS):
+        if _is_meat(title_l):
+            has_meat_poultry = True
+        if _keyword_allergens(title_l) & {Allergen.FISH, Allergen.SHELLFISH}:
+            has_seafood = True
 
     is_vegetarian = certain and not has_meat_poultry and not has_seafood
     is_vegan = is_vegetarian and not has_dairy and not has_eggs and not has_other_non_vegan
@@ -207,14 +235,15 @@ def derive_diet_flags(
 
 
 def analyze(
-    ingredients: list[dict[str, Any]], off: OpenFoodFacts | None = None
+    ingredients: list[dict[str, Any]], off: OpenFoodFacts | None = None, title: str = ""
 ) -> dict[str, Any]:
     """Tag allergens per ingredient and derive recipe-level allergens, certainty, and diet flags.
 
     Mutates each ingredient dict to add `allergen_tags`. Returns a dict with the recipe-level
     `allergens` (sorted union), `allergen_certain`, and `is_vegetarian`/`is_vegan`/`is_pescatarian`.
     When OFF is supplied its allergen tags supplement the keyword map and an OFF hit also counts as
-    recognition. Diet flags are forced False when certainty is lost (fail-closed for stricter diets).
+    recognition. Diet flags are forced False when certainty is lost (fail-closed for stricter diets), and
+    the recipe `title` is a fail-closed backstop for a meat/fish the ingredient list omits or renames.
     """
     recipe_allergens: set[Allergen] = set()
     certain = True
@@ -254,8 +283,9 @@ def analyze(
         if not recognized:
             certain = False
 
-    # Derive diet flags from the final (keyword ∪ trusted-filtered OFF) tags; uncertainty fails them closed.
-    flags = derive_diet_flags(per_ingredient, certain)
+    # Derive diet flags from the final (keyword ∪ trusted-filtered OFF) tags; uncertainty fails them closed,
+    # and the title backstops a meat/fish the ingredient rows missed.
+    flags = derive_diet_flags(per_ingredient, certain, title=title)
 
     return {
         "allergens": sorted(a.value for a in recipe_allergens),

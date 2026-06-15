@@ -1,7 +1,7 @@
 """Pydantic request model for saving a favorite.
 
-Mirrors contracts/favorites.openapi.yaml. Like every other cook-facing body, the owner (profile-ID) is
-NEVER part of this payload — it comes from the X-Profile-ID header via api/deps.py. `recipe_id` is kept
+Mirrors contracts/favorites.openapi.yaml. Like every other cook-facing body, the owner key is
+NEVER part of this payload — it is the authenticated cook account id from `require_cook` in api/deps.py. `recipe_id` is kept
 as a plain string here so the router can draw the contract's own distinction between a malformed id (400)
 and a well-formed-but-unknown id (404), rather than collapsing both into Pydantic's 422.
 """

@@ -38,6 +38,11 @@ What happens:
   starts — no false-healthy startup ordering.
 - The backend then runs `alembic upgrade head` → `scripts/seed_vault.sh` → `uvicorn`. Seeding
   precedes uvicorn because the app loads its secrets from Vault at startup and fails fast if absent.
+  > ⚠️ **Irreversible data wipe in migration `0005` (cook accounts, FR-015).** Re-keying
+  > `profiles`/`favorites`/`seen_history` to the new `cook_accounts` FK requires dropping all existing
+  > **anonymous** (`X-Profile-ID`-era) rows, and `downgrade()` does **not** restore them. On a fresh/dev DB
+  > this is a no-op. On **any environment with real cook data, back up first** — `alembic upgrade head` will
+  > delete every pre-009 profile, favorite, and seen-history row.
 - Tear down and return to a clean slate with `make down` (removes volumes); `make up` again returns
   to healthy.
 
@@ -62,6 +67,17 @@ make seed      # docker compose exec backend sh scripts/seed_vault.sh
 Dev secrets live at KV v2 mount `secret`, path `sous-chef` (what `app/infra/vault.py` reads). The
 seeded values are **throwaway dev placeholders** — real provider keys are added in their own phases
 and never committed (golden rule #4).
+
+Cook auth (009) adds two keys to the same path: **`COOK_SESSION_KEY`** (the cook-session JWT signing key
+— separate from the operator `JWT_SIGNING_KEY` so the two token domains stay isolated) and
+**`DEMO_COOK_PASSWORD`** (the password for the seeded demo/eval cook). `scripts/seed_vault.sh` writes dev
+placeholders for both locally and **requires** them in prod (it fails the seed if either is unset). The
+backend bootstraps the demo cook (`DEMO_COOK_USERNAME`, default `demo`) idempotently at startup, so a fresh
+DB is demo- and CI-ready. **CI/evals authenticate as this demo cook** — the eval runner
+([evals/run_evals.py](../evals/run_evals.py)) and the stack smoke test log in via `POST /auth/login` (helper
+in [evals/cook_session.py](../evals/cook_session.py)) and attach `Authorization: Bearer` on `/chat`, so the
+safety gates run on the authenticated path (no bypass). Seed `COOK_SESSION_KEY` + `DEMO_COOK_PASSWORD` in the
+CI env (FR-020).
 
 ## Build the recipe corpus (`make ingest`)
 
@@ -219,12 +235,18 @@ run standalone for development (below).
 
 ### Operator dashboard (Streamlit)
 
-The dashboard logs a single operator in (cookie survives refresh) and drives the backend `/admin/*` API.
-All three operator secrets come from **Vault**, so seed first:
+The dashboard signs a **named operator account** in (the backend mints a per-user JWT; the cookie survives
+refresh) and drives the backend `/admin/*` API (008-admin-managed-operator-accounts — supersedes the old
+single shared operator credential). Two Vault secrets back this surface, so seed first:
 
 ```bash
-make seed      # also writes OPERATOR_PASSWORD_HASH, DASHBOARD_COOKIE_KEY, ADMIN_API_TOKEN to secret/sous-chef
+make seed      # writes JWT_SIGNING_KEY, BOOTSTRAP_ADMIN_PASSWORD, DASHBOARD_COOKIE_KEY to secret/sous-chef
 ```
+
+> Per-user **password hashes are not Vault secrets** — they are one-way bcrypt and live in the
+> `operator_accounts` DB table. Only the JWT signing key, the bootstrap-admin password, and the cookie key
+> are in Vault. The backend **fails fast** at startup if `JWT_SIGNING_KEY` or `BOOTSTRAP_ADMIN_PASSWORD` is
+> missing.
 
 Then either use the compose service (`http://localhost:8501` after `make up`) or run it directly:
 
@@ -233,15 +255,34 @@ uv sync --extra dashboard
 uv run streamlit run dashboard/app.py     # http://localhost:8501
 ```
 
-- **Login**: username `operator` (from `OPERATOR_USERNAME`); the dev placeholder password is
-  **`souschef-dev`** (the bcrypt hash seeded by `scripts/seed_vault.sh`). **Refresh the page → still logged
-  in** (the cookie is signed with `DASHBOARD_COOKIE_KEY`). (FR-028)
+- **Login**: on a fresh DB the backend **bootstraps one admin** at startup — username `admin` (from
+  `BOOTSTRAP_ADMIN_USERNAME`), password = the Vault `BOOTSTRAP_ADMIN_PASSWORD` (dev placeholder
+  **`souschef-dev`**). There is **no sign-up** screen. **Refresh the page → still signed in** (the JWT is
+  held in a cookie signed with `DASHBOARD_COOKIE_KEY`; the JWT's 8h `exp` is the authoritative session clock).
+  (FR-002 / FR-013)
+- **Users** (admin-only) — `dashboard/pages/4_users.py`, gated by `require_admin()`: create an account
+  (username, initial password ≥ 8 chars, role `admin`/`user`), see the accounts table, and
+  **deactivate / reactivate / reset-password**. A non-admin operator sees no Users page and a `user`-role
+  token gets **403** from `/admin/users/*` (role enforced server-side, FR-011). The **last active admin
+  cannot be deactivated** (409 `last_admin`); a deactivated account is denied on its next request.
+- **Cooks** (admin-only, 009) — `dashboard/pages/5_cooks.py`, gated by `require_admin()`: this is how
+  **cook (end-user) accounts come to exist** — there is no self-signup. Create a cook (username + initial
+  password ≥ 8 chars; **no role**), see the cook-accounts table (username/status), and
+  **deactivate / reactivate / reset-password** via `/admin/cooks*`. A duplicate username → **409**, a `< 8`
+  password → **422**; a non-admin operator token gets **403**. Deactivating a cook denies them on their very
+  next request (FR-009). The seeded **demo** cook appears here too.
 - **Corpus** — page through ingested recipes with provenance + allergen/diet tags.
 - **Evals** — "Run evals" runs the gate set in-process and shows measured-vs-threshold pass/fail. (FR-025)
 - **Metrics** — classifier macro-F1, the workflow-vs-agent routing split (a lightweight Redis counter the
   router increments per decision), gate status, and a **Phoenix deep-link** for per-turn traces/cost.
 - **Auth boundary** — an incognito visitor who hasn't logged in gets no dashboard access; the cook widget
-  has no admin UI and cannot reach `/admin/*` (it holds no token). (FR-029) See [SECURITY.md](SECURITY.md) §5.
+  has no admin UI and cannot reach `/admin/*` (it holds only a cook-session token). (FR-029) See
+  [SECURITY.md](SECURITY.md) §5 (operator auth) and §6 (cook auth + total gating).
+
+> **Migration note (deploying 008):** the old single-operator credential and shared `ADMIN_API_TOKEN` no
+> longer grant access. After deploy, re-seed Vault with `JWT_SIGNING_KEY` + `BOOTSTRAP_ADMIN_PASSWORD`
+> (`scripts/seed_vault.sh` drops the retired keys), sign in as the bootstrap admin, create real accounts on
+> the Users page, then (optionally) rotate the bootstrap password by recreating that Vault key.
 
 > The dashboard reads Vault over HTTP using the non-secret `VAULT_ADDR` / `VAULT_TOKEN` and calls the
 > backend at `BACKEND_ADMIN_URL` (`.env`; defaults to `http://backend:8000` in compose). It never touches
@@ -249,8 +290,10 @@ uv run streamlit run dashboard/app.py     # http://localhost:8501
 
 ### Cook widget (React + Vite)
 
-Plain JS/JSX, talks **only** to the backend, attaching `X-Profile-ID` on every request. Use the compose
-service (`http://localhost:5173` after `make up`) or the Vite dev server:
+Plain JS/JSX, talks **only** to the backend. The widget is **gated behind cook login** (009): a cook signs
+in on the login screen (no self-signup) and the app attaches the cook-session JWT as `Authorization: Bearer`
+on every request; on a 401 it clears the token and returns to login. Use the compose service
+(`http://localhost:5173` after `make up`) or the Vite dev server:
 
 ```bash
 cd widget
@@ -263,11 +306,13 @@ npm run dev        # http://localhost:5173 ; VITE_API_BASE points at the backend
 `http://localhost:8000`, not the compose-internal `backend:8000`, because the SPA runs in the cook's browser.
 The widget is published on `:5173` to match the backend's `WIDGET_ORIGINS` CORS allow-list.
 
-Walk the cook loop: set **Constraints** (diet/allergy/servings — persists across reload) → tap a **Category**
-chip → real wall-compliant cards → click a card for **verbatim** steps + nutrition → **Favorite** it (still
-there after a reload) → type a discovery query (fresh cards) → try "ignore my nut allergy and add a peanut
-dish" → a calm **RefusalNotice**, no recipe. In **DevTools → Network**, confirm every call hits only
-`VITE_API_BASE` and carries `X-Profile-ID`. (FR-013..023)
+Walk the cook loop: **sign in** as the seeded demo cook (`DEMO_COOK_USERNAME`, default `demo`, with the
+Vault `DEMO_COOK_PASSWORD`) → set **Constraints** (diet/allergy/servings — persists across reload, now
+account-owned) → tap a **Category** chip → real wall-compliant cards → click a card for **verbatim** steps +
+nutrition → **Favorite** it (still there after a reload **and** after sign-out/sign-in) → type a discovery
+query (fresh cards) → try "ignore my nut allergy and add a peanut dish" → a calm **RefusalNotice**, no recipe.
+A page **refresh keeps you signed in** within the 8h session window. In **DevTools → Network**, confirm every
+call hits only `VITE_API_BASE` and carries `Authorization: Bearer <cook jwt>` (no `X-Profile-ID`). (FR-013..023)
 
 ## Operability & model flexibility (005)
 
@@ -368,6 +413,12 @@ from the repo and must be done by an operator with account access:
    ```bash
    curl -i https://<your-service>.up.railway.app/health    # expect HTTP 200 + status "ok"
    ```
+
+   > Since 009 the public app is **gated behind cook login** — `/chat` and the other cook routes return
+   > **401** without a cook-session Bearer token (only `/health` and `POST /auth/login` are open). To verify
+   > the end-to-end cook journey, open the widget and **sign in as the seeded demo cook** (`DEMO_COOK_USERNAME`
+   > + the Vault `DEMO_COOK_PASSWORD`), or `POST /auth/login` to mint a token and call `/chat` with
+   > `Authorization: Bearer`. Provision real cooks from the dashboard **Cooks** page.
 
 5. **Record the public URL** here once verified:
 

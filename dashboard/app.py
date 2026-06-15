@@ -33,6 +33,7 @@ def main() -> None:
         "- **Corpus** — page through the ingested recipes with their provenance and allergen/diet tags.\n"
         "- **Evals** — run the committed gates and compare measured scores to the thresholds.\n"
         "- **Metrics** — classifier macro-F1, the workflow-vs-agent split, gate status, and Phoenix links.\n"
+        "- **Users** _(admin only)_ — provision and manage operator accounts; non-admins are fenced out.\n"
     )
     st.caption("Use the sidebar to switch views. Your login is cookie-backed and survives a refresh.")
 

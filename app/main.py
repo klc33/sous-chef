@@ -17,13 +17,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.admin import register_admin_routers
 from app.api.health import register_health_router
 from app.api.user import register_user_routers
-from app.config import VAULT_KEY_LANGSMITH_API_KEY, get_settings
+from app.config import (
+    VAULT_KEY_BOOTSTRAP_ADMIN_PASSWORD,
+    VAULT_KEY_DEMO_COOK_PASSWORD,
+    VAULT_KEY_LANGSMITH_API_KEY,
+    get_settings,
+)
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.infra.cache import Cache
 from app.infra.db import Database
 from app.infra.tracing import add_tracing_middleware, configure_tracing
 from app.infra.vault import VaultAdapter
+from app.services.admin import operator_accounts
+from app.services.user import cook_auth
 
 
 def create_app() -> FastAPI:
@@ -59,8 +66,31 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        """Log startup, then dispose the DB engine and Redis pool on shutdown."""
+        """Seed the bootstrap admin + the demo cook (once each, idempotent), then dispose on shutdown.
+
+        Both seeds run here — after Vault load + the DB adapter are ready — so a fresh deploy always has an
+        operator way in (FR-014) and a demo/eval cook to authenticate as (009 FR-020). Each is a no-op once
+        its account exists, so a restart never duplicates one or rewrites a changed password. The usernames
+        are non-secret config; the passwords are the `BOOTSTRAP_ADMIN_PASSWORD` / `DEMO_COOK_PASSWORD` Vault
+        secrets (golden rule #4). The demo cook signs in like any cook — no bypass keeps the safety gates
+        exercised on the authenticated path (SC-008).
+        """
         log.info("startup", env=settings.env, version=settings.version)
+        session = db.session()
+        try:
+            operator_accounts.bootstrap_admin(
+                session,
+                username=settings.bootstrap_admin_username,
+                password=vault.get(VAULT_KEY_BOOTSTRAP_ADMIN_PASSWORD),
+            )
+            cook_auth.bootstrap_demo_cook(
+                session,
+                username=settings.demo_cook_username,
+                password=vault.get(VAULT_KEY_DEMO_COOK_PASSWORD),
+            )
+            session.commit()
+        finally:
+            session.close()
         try:
             yield
         finally:
@@ -80,13 +110,13 @@ def create_app() -> FastAPI:
     # Cross-origin access for the cook widget (a browser SPA on its own origin calling this backend at
     # VITE_API_BASE). Without this, the browser blocks every widget request at the CORS preflight. The
     # allow-list is non-secret config (widget origins, not credentials); we allow the cook verbs + the
-    # X-Profile-ID identity header the widget sends on every call. No credentials/cookies are used by the
-    # widget (identity is the header), so allow_credentials stays False.
+    # Authorization header the widget sends with its cook-session Bearer token on every call (009). The
+    # token rides in the header, not a cookie, so allow_credentials stays False.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.widget_origins_list,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["X-Profile-ID", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type"],
         allow_credentials=False,
     )
 

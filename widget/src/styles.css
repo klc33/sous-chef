@@ -459,3 +459,97 @@ button[disabled] {
   color: var(--ink);
   margin: 0 0 4px;
 }
+
+/* ── Header actions (favorites toggle + signed-in cook + sign out) ──────────────── */
+.app__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app__whoami {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+/* ── Login screen (009: gated app, professional, no sign-up) ────────────────────── */
+.login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login__card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 32px 28px;
+}
+
+.login__brand {
+  margin: 0;
+  font-size: 1.8rem;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+
+.login__tagline {
+  color: var(--muted);
+  margin: 4px 0 20px;
+}
+
+.login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.login__field input {
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.login__field input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.login__submit {
+  margin-top: 4px;
+  padding: 11px 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 650;
+}
+
+.login__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.login__note {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+}

@@ -1,7 +1,9 @@
 """Profile data access — the ONLY place profile rows are read or written (ORM/parameterized only).
 
 `get` returns the stored row or None (the service layer applies defaults when None). `upsert` creates
-or updates the row keyed by the profile-ID (which comes from the header, never the body).
+or updates the row keyed by the owner key — which since 009 is the authenticated cook account id
+(`require_cook`), threaded in exactly where the `X-Profile-ID` header value used to be. The shape is
+unchanged: only the source of the key moved from a client header to the verified cook token.
 """
 
 from __future__ import annotations

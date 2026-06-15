@@ -2,10 +2,10 @@
 
 Mirrors contracts/chat.openapi.yaml. One turn flows exactly as mandated:
 `input rail → router → workflow | agent → (recipes via recipe_view = the wall) → output rail`. Cook
-identity is the passwordless `X-Profile-ID` header (never the body); the cook's `ConstraintProfile` is
-resolved once and threaded to every stage. A refused input short-circuits before routing and returns a
-safe `ChatResponse(refused=true)`. The endpoint is rate-limited PER PROFILE via slowapi so one cook can't
-exhaust the shared hosted-API budget.
+identity (the owner key) comes from the verified cook-session JWT via `require_cook` (never a header or
+the body); the cook's `ConstraintProfile` is resolved once and threaded to every stage. A refused input
+short-circuits before routing and returns a safe `ChatResponse(refused=true)`. The endpoint is
+rate-limited PER COOK via slowapi so one cook can't exhaust the shared hosted-API budget.
 
 This foundational phase wires the whole pipeline; the agent path (plan_meals / low-confidence) returns an
 honest interim reply until US3 implements `app/agent/loop.py`.
@@ -21,7 +21,9 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.agent import loop as agent_loop
-from app.api.deps import get_db, require_profile_id
+from app.api.deps import CookId, get_db
+from app.config import VAULT_KEY_COOK_SESSION_KEY
+from app.core import security
 from app.guardrails import input_rails, output_rails
 from app.repo import profiles as repo_profiles
 from app.schemas.chat import ChatRequest, ChatResponse
@@ -34,21 +36,39 @@ from app.services.user.constraint_guard import ConstraintProfile
 # Servings an unknown cook (no stored profile) is assumed to cook for — mirrors the rest of the app.
 _DEFAULT_SERVINGS = 2
 
-# Annotated dependency aliases (matches the recipes router idiom).
-ProfileId = Annotated[str, Depends(require_profile_id)]
+# Annotated dependency aliases (matches the recipes router idiom). The owner key (`profile_id`) now comes
+# from the verified cook token via `require_cook` (CookId), never a header.
 DbSession = Annotated[Session, Depends(get_db)]
 
-# Per-profile rate limit: the limit key is the cook's profile-ID (falling back to client address when the
-# header is somehow absent), so each cook gets an independent budget against the shared hosted APIs.
+# Per-cook rate limit: the limit key is the cook account id from the Bearer token (falling back to the
+# client address when no valid token is present), so each cook gets an independent budget against the
+# shared hosted APIs.
 _DEFAULT_RATE = "30/minute"
+_BEARER_PREFIX = "Bearer "
 
 
-def _profile_rate_key(request: Request) -> str:
-    """Return the rate-limit bucket key for a request: the X-Profile-ID header, else the client address."""
-    return request.headers.get("X-Profile-ID") or get_remote_address(request)
+def _cook_rate_key(request: Request) -> str:
+    """Return the rate-limit bucket key: the cook account id from the Bearer token, else the client address.
+
+    Decodes the `Authorization: Bearer` cook-session JWT (with the Vault COOK_SESSION_KEY) to recover the
+    `sub` cook id, so the budget tracks the authenticated cook exactly as `require_cook` resolves it. Any
+    missing/undecodable token (an unauthenticated request that will 401 in the gate anyway) falls back to
+    the client address — the key func must never raise, or it would break request routing.
+    """
+    authorization = request.headers.get("Authorization", "")
+    if authorization.startswith(_BEARER_PREFIX):
+        token = authorization[len(_BEARER_PREFIX) :].strip()
+        try:
+            signing_key = request.app.state.vault.get(VAULT_KEY_COOK_SESSION_KEY)
+            sub = security.decode_cook_token(token, signing_key=signing_key).get("sub")
+            if sub:
+                return str(sub)
+        except Exception:  # noqa: BLE001 — an undecodable token simply falls back to the address bucket
+            pass
+    return get_remote_address(request)
 
 
-limiter = Limiter(key_func=_profile_rate_key)
+limiter = Limiter(key_func=_cook_rate_key)
 
 router = APIRouter()
 
@@ -106,7 +126,7 @@ def _agent(
 def chat_turn(
     request: Request,
     body: ChatRequest,
-    profile_id: ProfileId,
+    profile_id: CookId,
     session: DbSession,
 ) -> ChatResponse:
     """Handle one conversational turn and return the grounded ChatResponse.
@@ -114,7 +134,7 @@ def chat_turn(
     Resolves the cook's constraints, screens the message through the input rail (a refusal short-circuits
     to a safe reply before any routing), routes the turn via the trained classifier, dispatches to the
     workflow (or the interim agent path), and finally runs the output rail (redaction + wall re-assert)
-    before the response leaves. `request` is required by the slowapi limiter; the limit is per profile-ID.
+    before the response leaves. `request` is required by the slowapi limiter; the limit is per cook id.
     """
     cp = _resolve_profile(session, profile_id)
 

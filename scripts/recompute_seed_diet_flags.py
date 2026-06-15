@@ -10,8 +10,10 @@ It applies the corrected `ingestion.allergens` logic to each recipe in `seeds/co
   * Open Food Facts false positives on trusted whole foods (garlic → "garlic bread" → milk) are stripped
     by recomputing those ingredients' tags from the keyword map alone.
   * Recipe `allergens` becomes the union of the cleaned per-ingredient tags.
-  * Diet flags are re-derived via `derive_diet_flags`, so an animal allergen tag (incl. OFF-supplied milk)
-    fails the matching diet closed and newly-recognized meat cuts (oxtail …) drop vegetarian/vegan.
+  * Diet flags are re-derived via `derive_diet_flags` (passing each row's `title`), so an animal allergen
+    tag (incl. OFF-supplied milk) fails the matching diet closed, newly-recognized meat cuts (oxtail …)
+    drop vegetarian/vegan, and a meat/fish named only in the TITLE (a "pork belly" whose ingredients omit
+    the pork, or "broiler" for chicken) now drops the matching diet closed too.
 `allergen_certain` is preserved as-is (it encodes the original OFF recognition we cannot replay offline,
 and keeping it is the conservative, fail-closed choice). After this lands, re-run `load_seed_corpus.py`
 against any target DB to propagate the corrected rows.
@@ -65,7 +67,7 @@ def run() -> None:
             changed_allergens += 1
         row["allergens"] = new_allergens
 
-        flags = derive_diet_flags(per_ingredient, row["allergen_certain"])
+        flags = derive_diet_flags(per_ingredient, row["allergen_certain"], title=row.get("title", ""))
         if any(row.get(k) != v for k, v in flags.items()):
             changed_flags += 1
         row.update(flags)

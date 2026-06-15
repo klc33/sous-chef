@@ -1,6 +1,6 @@
-"""POST/GET/DELETE /favorites — per-cook saved recipes, persisted across sessions by X-Profile-ID.
+"""POST/GET/DELETE /favorites — per-cook saved recipes, persisted across sessions by the cook account.
 
-The owner is always the header profile-ID (never the body). Saving is idempotent (a repeat save is the
+The owner key comes from the verified cook token (never the body). Saving is idempotent (a repeat save is the
 same 201, no duplicate) and validated against the corpus: an unknown recipe_id is a 404, a malformed one
 a 400 — the contract's two distinct bad-input cases. Listing builds cards ONLY through the favorites
 service, which runs the wall, so a saved recipe that now violates the cook's constraints is omitted.
@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_profile_id
+from app.api.deps import CookId, get_db
 from app.core.errors import AppError
 from app.repo import recipes as repo_recipes
 from app.schemas.favorite import FavoriteIn
@@ -25,8 +25,8 @@ from app.services.user import favorites as favorites_service
 
 router = APIRouter()
 
-# Annotated dependency aliases (keeps Depends out of default values; the modern FastAPI idiom).
-ProfileId = Annotated[str, Depends(require_profile_id)]
+# Annotated dependency aliases (keeps Depends out of default values; the modern FastAPI idiom). The owner
+# key (`profile_id`) now comes from the verified cook token via `require_cook` (CookId), never a header.
 DbSession = Annotated[Session, Depends(get_db)]
 
 
@@ -45,7 +45,7 @@ def _parse_recipe_id(raw: str) -> uuid.UUID:
 
 
 @router.post("/favorites", status_code=status.HTTP_201_CREATED)
-def save_favorite(body: FavoriteIn, profile_id: ProfileId, session: DbSession) -> None:
+def save_favorite(body: FavoriteIn, profile_id: CookId, session: DbSession) -> None:
     """Save a recipe to the cook's favorites (idempotent): 400 malformed id, 404 unknown, else 201.
 
     Confirms the recipe exists in the corpus before saving so a bad id never becomes a dangling favorite;
@@ -59,7 +59,7 @@ def save_favorite(body: FavoriteIn, profile_id: ProfileId, session: DbSession) -
 
 
 @router.get("/favorites", response_model=list[RecipeCard])
-def list_favorites(profile_id: ProfileId, session: DbSession) -> list[RecipeCard]:
+def list_favorites(profile_id: CookId, session: DbSession) -> list[RecipeCard]:
     """Return the cook's favorites as wall-filtered cards; a now-violating saved recipe is omitted.
 
     Delegates to the favorites service, which resolves the cook's current constraints and builds cards
@@ -69,7 +69,7 @@ def list_favorites(profile_id: ProfileId, session: DbSession) -> list[RecipeCard
 
 
 @router.delete("/favorites/{recipe_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_favorite(recipe_id: str, profile_id: ProfileId, session: DbSession) -> None:
+def remove_favorite(recipe_id: str, profile_id: CookId, session: DbSession) -> None:
     """Remove a recipe from the cook's favorites (idempotent): always 204 for a valid profile.
 
     Removal is forgiving — a not-saved or malformed id simply has nothing to delete, so it still answers

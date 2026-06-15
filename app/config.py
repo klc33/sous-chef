@@ -19,13 +19,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 MIGRATION_EMBEDDINGS_DIM = 1536
 
 # ── Operator-dashboard auth: canonical Vault KV key names (004-evals-and-uis) ──────────────
-# The single operator's password HASH, the cookie-signing key, and the shared admin API token
-# are SECRETS — they live only in Vault (golden rule #4), never in env or this file. Centralizing
-# the key names here keeps the seed script (scripts/seed_vault.sh), the backend's admin_deps, and
-# the Streamlit dashboard all reading the SAME keys. The username is non-secret (env field below).
-VAULT_KEY_OPERATOR_PASSWORD_HASH = "OPERATOR_PASSWORD_HASH"
+# The cookie-signing key is a SECRET — it lives only in Vault (golden rule #4), never in env or
+# this file. Centralizing the key names here keeps the seed script (scripts/seed_vault.sh), the
+# backend's admin_deps, and the Streamlit dashboard all reading the SAME keys.
 VAULT_KEY_DASHBOARD_COOKIE_KEY = "DASHBOARD_COOKIE_KEY"
-VAULT_KEY_ADMIN_API_TOKEN = "ADMIN_API_TOKEN"
+
+# ── Operator-account auth: Vault KV key names (008-admin-managed-operator-accounts) ────────
+# Both are SECRETS — Vault only (golden rule #4). The signing key verifies the login JWT; the
+# bootstrap password seeds the first admin on an empty accounts table (see secrets-keyspace.md).
+VAULT_KEY_JWT_SIGNING_KEY = "JWT_SIGNING_KEY"
+VAULT_KEY_BOOTSTRAP_ADMIN_PASSWORD = "BOOTSTRAP_ADMIN_PASSWORD"
+
+# ── Cook-account auth: Vault KV key names (009-admin-managed-cook-accounts) ─────────────────
+# Both are SECRETS — Vault only (golden rule #4). COOK_SESSION_KEY signs/verifies the cook-session
+# JWT and is DISTINCT from 008's JWT_SIGNING_KEY so an operator token can never be replayed as a cook
+# session and vice-versa (FR-013, domain isolation). DEMO_COOK_PASSWORD is the seeded demo/eval cook's
+# initial password, bcrypt-hashed at bootstrap and never persisted in clear (see secrets-keyspace.md).
+VAULT_KEY_COOK_SESSION_KEY = "COOK_SESSION_KEY"
+VAULT_KEY_DEMO_COOK_PASSWORD = "DEMO_COOK_PASSWORD"
 # Tracing API key — a SECRET, lives only in Vault (golden rule #4). Used when TRACING_PROVIDER=langsmith
 # so the OTLP exporter can authenticate to LangSmith Cloud; self-hosted Phoenix needs no key.
 VAULT_KEY_LANGSMITH_API_KEY = "LANGSMITH_API_KEY"
@@ -133,11 +144,21 @@ class Settings(BaseSettings):
     # the 3 displayed cards. Must exceed the display count so wall-compliant cards still surface.
     retrieval_candidate_pool: int = Field(default=20)
 
-    # ── 004-evals-and-uis: operator dashboard login name (non-secret) ─────────────────────────
-    # The single operator's username on the Streamlit dashboard. Non-secret, so it comes from env
-    # (see .env.example OPERATOR_USERNAME). The matching password hash, cookie-signing key, and
-    # shared admin token are SECRETS and come from Vault (see the VAULT_KEY_* constants above).
-    operator_username: str = Field(default="operator")
+    # ── 008-admin-managed-operator-accounts: account auth knobs (non-secret) ──────────────────
+    # Username for the admin bootstrapped at startup when the accounts table is empty (the
+    # *password* is the Vault secret BOOTSTRAP_ADMIN_PASSWORD, never here). `jwt_ttl_minutes` is the
+    # login token lifetime — the authoritative session clock (8h per Clarifications); the dashboard
+    # cookie window must be ≥ this so the cookie never lapses before a still-valid token.
+    bootstrap_admin_username: str = Field(default="admin")
+    jwt_ttl_minutes: int = Field(default=480)
+
+    # ── 009-admin-managed-cook-accounts: cook-session knobs (non-secret) ──────────────────────
+    # Username for the demo/eval cook seeded at startup when it does not yet exist (the *password* is
+    # the Vault secret DEMO_COOK_PASSWORD, never here) — this is how CI/evals and the live demo
+    # authenticate without a bypass (FR-020). `cook_jwt_ttl_minutes` is the cook-session token
+    # lifetime — the authoritative session clock (8h, mirrors 008's jwt_ttl_minutes).
+    demo_cook_username: str = Field(default="demo")
+    cook_jwt_ttl_minutes: int = Field(default=480)
 
     # ── 004-evals-and-uis: cook-widget CORS allow-list (non-secret) ───────────────────────────
     # The React widget is a browser SPA served from its OWN origin (the Vite dev server on :5173, or

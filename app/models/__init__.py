@@ -6,6 +6,8 @@ registration) is intentional — do not remove them.
 """
 
 from app.models.base import Base
+from app.models.cook_account import CookAccount
+from app.models.operator_account import OperatorAccount
 from app.models.profile import Favorite, Profile, SeenHistory
 from app.models.recipe import (
     Allergen,
@@ -34,4 +36,8 @@ __all__ = [
     "Profile",
     "Favorite",
     "SeenHistory",
+    # operator_account.py
+    "OperatorAccount",
+    # cook_account.py
+    "CookAccount",
 ]

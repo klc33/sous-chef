@@ -1,10 +1,11 @@
 """Integration tests for User Story 3 — save and revisit favorites.
 
-Drives the real POST/GET/DELETE /favorites path against a real DB with the cook identified only by
-X-Profile-ID. Asserts the lifecycle (save → list → remove), idempotent double-save (one entry), an
-unknown recipe is rejected (404), persistence across a fresh client sharing the same profile-ID, and —
-the key safety property — the wall on the list: a favorite saved before an allergy is declared drops out
-of GET /favorites once that allergy is set via PUT /profile.
+Drives the real POST/GET/DELETE /favorites path against a real DB with the cook authenticated by a
+cook-session token (the `auth` fixture seeds the cook and returns its Bearer header). Asserts the
+lifecycle (save → list → remove), idempotent double-save (one entry), an unknown recipe is rejected (404),
+persistence across a fresh client signed in as the same cook, and — the key safety property — the wall on
+the list: a favorite saved before an allergy is declared drops out of GET /favorites once that allergy is
+set via PUT /profile.
 """
 
 from __future__ import annotations
@@ -15,7 +16,8 @@ import pytest
 from app.models.recipe import Ingredient, Recipe
 from sqlalchemy.orm import Session
 
-_COOK = {"X-Profile-ID": "cook-fav"}
+# The cook's owner key; `auth(_COOK)` seeds an active cook with this id and returns its Bearer header.
+_COOK = "cook-fav"
 
 
 def _add_recipe(
@@ -73,76 +75,76 @@ def peanut_recipe(db_session: Session) -> uuid.UUID:
     )
 
 
-async def test_save_list_remove_lifecycle(make_user_client, safe_recipe) -> None:
+async def test_save_list_remove_lifecycle(make_user_client, auth, safe_recipe) -> None:
     """Saving returns 201, the recipe then appears in GET /favorites, and DELETE removes it."""
     async with make_user_client() as client:
-        save = await client.post("/favorites", headers=_COOK, json={"recipe_id": str(safe_recipe)})
+        save = await client.post("/favorites", headers=auth(_COOK), json={"recipe_id": str(safe_recipe)})
         assert save.status_code == 201
 
-        listed = await client.get("/favorites", headers=_COOK)
+        listed = await client.get("/favorites", headers=auth(_COOK))
         assert listed.status_code == 200
         assert [c["id"] for c in listed.json()] == [str(safe_recipe)]
 
-        removed = await client.delete(f"/favorites/{safe_recipe}", headers=_COOK)
+        removed = await client.delete(f"/favorites/{safe_recipe}", headers=auth(_COOK))
         assert removed.status_code == 204
 
-        empty = await client.get("/favorites", headers=_COOK)
+        empty = await client.get("/favorites", headers=auth(_COOK))
         assert empty.json() == []
 
 
-async def test_double_save_is_idempotent(make_user_client, safe_recipe) -> None:
+async def test_double_save_is_idempotent(make_user_client, auth, safe_recipe) -> None:
     """Saving the same recipe twice still yields exactly one favorite (idempotent, FR-018)."""
     async with make_user_client() as client:
-        first = await client.post("/favorites", headers=_COOK, json={"recipe_id": str(safe_recipe)})
-        second = await client.post("/favorites", headers=_COOK, json={"recipe_id": str(safe_recipe)})
+        first = await client.post("/favorites", headers=auth(_COOK), json={"recipe_id": str(safe_recipe)})
+        second = await client.post("/favorites", headers=auth(_COOK), json={"recipe_id": str(safe_recipe)})
         assert first.status_code == 201
         assert second.status_code == 201
 
-        listed = await client.get("/favorites", headers=_COOK)
+        listed = await client.get("/favorites", headers=auth(_COOK))
         assert [c["id"] for c in listed.json()] == [str(safe_recipe)]
 
 
-async def test_save_unknown_recipe_is_404(make_user_client) -> None:
+async def test_save_unknown_recipe_is_404(make_user_client, auth) -> None:
     """Saving a well-formed but non-existent recipe id is a 404 — no dangling favorite is created."""
     async with make_user_client() as client:
         resp = await client.post(
-            "/favorites", headers=_COOK, json={"recipe_id": str(uuid.uuid4())}
+            "/favorites", headers=auth(_COOK), json={"recipe_id": str(uuid.uuid4())}
         )
     assert resp.status_code == 404
 
 
-async def test_favorites_persist_across_fresh_client(make_user_client, safe_recipe) -> None:
-    """A favorite saved by one client is still listed by a fresh client with the same profile-ID."""
+async def test_favorites_persist_across_fresh_client(make_user_client, auth, safe_recipe) -> None:
+    """A favorite saved by one client is still listed by a fresh client signed in as the same cook."""
     async with make_user_client() as client:
-        save = await client.post("/favorites", headers=_COOK, json={"recipe_id": str(safe_recipe)})
+        save = await client.post("/favorites", headers=auth(_COOK), json={"recipe_id": str(safe_recipe)})
         assert save.status_code == 201
 
     # A brand-new client/session (same X-Profile-ID) — favorites are persisted, not in-memory.
     async with make_user_client() as fresh:
-        listed = await fresh.get("/favorites", headers=_COOK)
+        listed = await fresh.get("/favorites", headers=auth(_COOK))
     assert [c["id"] for c in listed.json()] == [str(safe_recipe)]
 
 
-async def test_wall_omits_now_violating_favorite(make_user_client, peanut_recipe) -> None:
+async def test_wall_omits_now_violating_favorite(make_user_client, auth, peanut_recipe) -> None:
     """A peanut recipe favorited while unconstrained drops out of the list after a nut allergy is set."""
     async with make_user_client() as client:
         # Save while the cook has no constraints — the peanut recipe is currently surfaceable.
         save = await client.post(
-            "/favorites", headers=_COOK, json={"recipe_id": str(peanut_recipe)}
+            "/favorites", headers=auth(_COOK), json={"recipe_id": str(peanut_recipe)}
         )
         assert save.status_code == 201
-        assert [c["id"] for c in (await client.get("/favorites", headers=_COOK)).json()] == [
+        assert [c["id"] for c in (await client.get("/favorites", headers=auth(_COOK))).json()] == [
             str(peanut_recipe)
         ]
 
         # Declare a peanut allergy — the wall must now omit the saved peanut recipe from the list.
         put = await client.put(
             "/profile",
-            headers=_COOK,
+            headers=auth(_COOK),
             json={"diet": "none", "allergies": ["peanuts"], "default_servings": 2},
         )
         assert put.status_code == 200
 
-        listed = await client.get("/favorites", headers=_COOK)
+        listed = await client.get("/favorites", headers=auth(_COOK))
     assert listed.status_code == 200
     assert listed.json() == []
