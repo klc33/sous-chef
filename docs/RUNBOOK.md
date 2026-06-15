@@ -425,6 +425,27 @@ nginx. **Every non-backend service must set its own `railwayConfigFile`** — th
 services (T017b/T017c) must each point at [`railway/dashboard.toml`](../railway/dashboard.toml) /
 [`railway/phoenix.toml`](../railway/phoenix.toml) to avoid the same trap.
 
+### Backend/dashboard images exceed the ~500MB target (T039)
+
+Golden rule #3 / [`docs/DESIGN.md`](DESIGN.md) aim for images **< ~500MB**. The two Python images land
+**above** that and cannot reach it without dropping components the app genuinely needs:
+
+| Image | Size | Driven by |
+|-------|------|-----------|
+| `backend` | **~1.27GB** | the backend venv is ~711MB: Presidio's PII stack (spaCy ~123M + `phonenumbers` ~46M + `blis` ~34M) plus the classifier-serving stack (scipy ~111M + scikit-learn ~49M + numpy ~42M). All required — Presidio is the redaction gate (golden rule #5) and scikit-learn serves the intent classifier. |
+| `dashboard` | **~900MB** | streamlit + pandas + their transitive numeric stack. |
+| `widget` | ~74MB | nginx + the built static bundle — well under target. |
+
+Still **no torch** in any image (golden rule #3's hard line holds) and no dev/test tooling
+(`uv sync --no-dev`). The Dockerfiles keep the uv **wheel cache** out of the image via a BuildKit cache
+mount (`--mount=type=cache,target=/root/.cache/uv`), which already cut the images ~36%/38% (backend
+1.99GB→1.27GB, dashboard 1.44GB→900MB) — the leftover size is the resolved venv itself, not cache.
+
+**Accepted for v0.1.0** — the images run fine on Railway and nothing in the cook journey depends on the
+~500MB figure. **Revisit** only if image pull/boot time becomes a problem: options are a multi-stage build
+that strips spaCy model build artifacts, or moving classifier serving / PII redaction behind a smaller
+runtime. Until then the ~500MB line in DESIGN.md is aspirational, noted here so an operator isn't surprised.
+
 ## Redis is optional — remove it to free a Railway service slot
 
 Redis has **one** product use: the operator dashboard's workflow-vs-agent **routing-split counter**

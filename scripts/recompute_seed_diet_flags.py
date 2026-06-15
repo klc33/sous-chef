@@ -32,15 +32,17 @@ _RECIPES_PATH = _REPO_ROOT / "seeds" / "corpus" / "recipes.jsonl"
 
 
 def _cleaned_tags(name: str, frozen: list[str]) -> set[Allergen]:
-    """Return an ingredient's corrected allergen set: keyword-only for trusted foods, else the frozen set.
+    """Return an ingredient's corrected allergen set: keyword-only for trusted foods, else frozen ∪ keyword.
 
     Trusted whole foods get their tags recomputed from the keyword map alone, which drops the OFF
-    false-positives baked into the committed artifact; every other ingredient keeps its frozen tags
-    (keyword ∪ OFF), exactly as the corrected `analyze()` would now emit for the same OFF data.
+    false-positives baked into the committed artifact. Every other ingredient keeps its frozen tags
+    (keyword ∪ OFF) UNIONED with a fresh keyword pass — so newly-added keywords (e.g. the fish species
+    "pilchard"/"roughy") are picked up on the frozen artifact without re-fetching OFF. Unioning only ever
+    ADDS allergens, so it tightens the wall and can never drop a real one.
     """
     if _matches(name.lower(), _OFF_TRUSTED_SAFE):
         return _keyword_allergens(name.lower())
-    return {Allergen(tag) for tag in frozen}
+    return {Allergen(tag) for tag in frozen} | _keyword_allergens(name.lower())
 
 
 def run() -> None:

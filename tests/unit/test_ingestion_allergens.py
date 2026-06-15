@@ -88,3 +88,42 @@ def test_derive_diet_flags_seafood_tag_is_pescatarian_not_vegetarian() -> None:
     assert flags["is_pescatarian"] is True
     assert flags["is_vegetarian"] is False
     assert flags["is_vegan"] is False
+
+
+def test_uncommon_fish_species_detected_as_fish() -> None:
+    """Species the original short list missed — orange roughy, pilchards — must tag fish, dropping vegetarian.
+
+    These are the live wall-violation cases (a vegetarian was shown "orange roughy"): the fish keyword
+    list was too small, so neither produced a fish tag and both were wrongly flagged vegetarian. "orange
+    roughy" also defeated the fail-closed certainty check because "orange" is a known-safe substring.
+    """
+    off = FakeOFF({})
+    for species in ("orange roughy", "pilchards", "swordfish", "monkfish"):
+        result = analyze(_ings(species, "onion", "garlic"), off=off)
+        assert "fish" in result["allergens"], species
+        assert result["is_vegetarian"] is False, species
+        assert result["is_pescatarian"] is True, species  # fish is pescatarian-compatible
+
+
+def test_lard_is_meat_but_does_not_flag_collard_greens() -> None:
+    """Lard (animal fat) fails vegetarian/pescatarian, matched as a WHOLE word so "collard" stays safe.
+
+    `lard` is a substring of "collard greens" (a vegetable), so it must be boundary-matched: a recipe
+    with lard is non-vegetarian and non-pescatarian, while a collard-greens dish remains vegetarian.
+    """
+    off = FakeOFF({})
+    lard = analyze(_ings("lard", "flour", "sugar"), off=off)
+    assert lard["is_vegetarian"] is False
+    assert lard["is_pescatarian"] is False
+
+    collard = analyze(_ings("collard greens", "onion", "garlic"), off=off)
+    assert collard["is_vegetarian"] is True
+    assert collard["is_pescatarian"] is True
+
+
+def test_carp_substring_does_not_mistag_mascarpone() -> None:
+    """The fish list deliberately excludes "carp" — "mascarpone" must not be tagged fish or lose vegetarian."""
+    off = FakeOFF({})
+    result = analyze(_ings("mascarpone", "sugar", "flour"), off=off)
+    assert "fish" not in result["allergens"]
+    assert result["is_vegetarian"] is True

@@ -42,7 +42,10 @@ app/core/       redaction, config, shared primitives
 (corpus pipeline), `evals/` (CI gates), `scripts/` (seed/export/load ops).
 
 **No torch, ever** (golden rule #3, P3/P10): the LLM + embeddings are hosted-API calls; the classifier is
-trained offline and served via `joblib`. Images stay < ~500MB.
+trained offline and served via `joblib` — so no deep-learning runtime enters any image. The lean target is
+~500MB; the backend/dashboard images currently run larger (Presidio's spaCy + the scikit-learn/scipy
+serving stack), an accepted v0.1.0 deviation tracked in
+[RUNBOOK → Known deployment deviations](RUNBOOK.md#known-deployment-deviations-v010).
 
 ## 3. The per-turn request flow
 
