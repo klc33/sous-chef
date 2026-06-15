@@ -19,7 +19,7 @@ RUN apt-get update \
 #    The uv wheel cache is a BuildKit cache mount (not a layer), so the downloaded wheels never
 #    bloat the image — only the resolved /srv/.venv lands in the layer (golden rule #3).
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev --extra backend
 
 # 2) App layer: copy the source the backend actually needs, then finalize the environment.
@@ -44,7 +44,7 @@ COPY eval_thresholds.yaml ./
 # so local == prod data (FR-013). embeddings.npy is a Git LFS object: CI must `git lfs pull` before the
 # build, or this copies the pointer file and the loader fails fast on the dim/count check.
 COPY seeds ./seeds
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra backend
 
 ENV PATH="/srv/.venv/bin:$PATH"
