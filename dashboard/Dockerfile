@@ -18,7 +18,7 @@ WORKDIR /srv
 #    project source yet, so this layer is reused across dashboard code changes. The uv wheel cache is a
 #    BuildKit cache mount (not a layer), so downloaded wheels never bloat the image (golden rule #3).
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev --extra dashboard
 
 # 2) App layer: the Streamlit package (entry app.py + auth.py + pages/). It is imported as `dashboard.*`,
