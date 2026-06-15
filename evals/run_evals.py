@@ -40,6 +40,12 @@ _REDTEAM_ATTEMPTS = _REPO_ROOT / "evals" / "redteam" / "attempts.yaml"
 _RAG_GOLDEN = _REPO_ROOT / "evals" / "rag" / "golden.yaml"
 _AGENT_CASES = _REPO_ROOT / "evals" / "agent_tool_selection" / "cases.yaml"
 
+# Where `run()` persists the last run's scores (one metric.json per suite). These are generated
+# run-artifacts (gitignored), not committed source — written only when the suite actually produces a
+# score, so a SKIP never clobbers the last good numbers.
+_CLASSIFIER_METRIC = _REPO_ROOT / "evals" / "classifier" / "metric.json"
+_RAG_METRIC = _REPO_ROOT / "evals" / "rag" / "metric.json"
+
 # Frozen RAG-judge config (report-only faithfulness/answer-relevancy, research R1). The model id is
 # PINNED so scores stay comparable run-to-run ("frozen judge"); reusing the existing Groq adapter means
 # zero new dependencies (FR-030). Bump the pin deliberately, never silently — a changed judge invalidates
@@ -60,11 +66,17 @@ _REDACTION_SECRETS = (
 
 @dataclass(frozen=True)
 class GateResult:
-    """One gate's outcome: its name, a PASS/FAIL/SKIP verdict, and a human-readable score/detail line."""
+    """One gate's outcome: its name, a PASS/FAIL/SKIP verdict, and a human-readable score/detail line.
+
+    `metrics` carries the gate's structured numbers (e.g. `{"macro_f1": 0.97}`) so the CLI can persist them
+    to a `metric.json`; it is internal to the runner (the wire schema in app/schemas/admin.py mirrors only
+    name/status/detail) and is None on SKIP / missing-input, where there is no number to record.
+    """
 
     name: str
     status: str  # "PASS" | "FAIL" | "SKIP"
     detail: str
+    metrics: dict[str, Any] | None = None
 
 
 def _thresholds() -> dict[str, Any]:
@@ -96,13 +108,19 @@ def gate_classifier(thresholds: dict[str, Any]) -> GateResult:
         # pandas (research R8 — no backend runtime dep added). The testset is tiny, so csv is ample.
         with _CLASSIFIER_TESTSET.open(encoding="utf-8", newline="") as handle:
             rows = list(csv.DictReader(handle))
+        truth = [row["label"] for row in rows]
         preds = model.predict([row["text"] for row in rows])
-        macro_f1 = float(f1_score([row["label"] for row in rows], preds, average="macro"))
+        macro_f1 = float(f1_score(truth, preds, average="macro"))
+        # Per-class F1 too, so the persisted metric.json lets an operator spot a weak label.
+        labels = sorted(set(truth))
+        per = f1_score(truth, preds, average=None, labels=labels, zero_division=0)
+        per_class = {label: float(score) for label, score in zip(labels, per, strict=False)}
     except FileNotFoundError as exc:
         # A missing artifact/testset means the model was never trained — that IS a failed grade, not a skip.
         return GateResult("classifier macro-F1", "FAIL", f"missing input ({exc!s})")
     status = "PASS" if macro_f1 >= floor else "FAIL"
-    return GateResult("classifier macro-F1", status, f"{macro_f1:.3f} (floor {floor:.3f})")
+    metrics = {"macro_f1": macro_f1, "per_class": per_class, "floor": floor}
+    return GateResult("classifier macro-F1", status, f"{macro_f1:.3f} (floor {floor:.3f})", metrics)
 
 
 def gate_redteam(thresholds: dict[str, Any]) -> GateResult:
@@ -219,11 +237,13 @@ def gate_rag(thresholds: dict[str, Any]) -> list[GateResult]:
                 "rag hit@3",
                 "PASS" if hit_rate >= hit_floor else "FAIL",
                 f"{hit_rate:.3f} ({hits}/{len(cases)}, floor {hit_floor})",
+                {"hit_at_k": hit_rate, "hit_floor": hit_floor, "k": k, "hits": hits, "cases": len(cases)},
             ),
             GateResult(
                 "rag MRR",
                 "PASS" if mrr >= mrr_floor else "FAIL",
                 f"{mrr:.3f} (floor {mrr_floor})",
+                {"mrr": mrr, "mrr_floor": mrr_floor},
             ),
         ]
     except Exception as exc:  # noqa: BLE001 — provider/corpus not ready ⇒ skip, never a false failure
@@ -412,11 +432,13 @@ def gate_judge(thresholds: dict[str, Any]) -> list[GateResult]:
                 "rag faithfulness (report-only)",
                 "PASS",
                 f"{faith_total / scored:.3f} (report-only, {scored} cases)",
+                {"faithfulness": faith_total / scored, "cases_scored": scored},
             ),
             GateResult(
                 "rag answer-relevancy (report-only)",
                 "PASS",
                 f"{relevancy_total / scored:.3f} (report-only, {scored} cases)",
+                {"answer_relevancy": relevancy_total / scored},
             ),
         ]
     except Exception as exc:  # noqa: BLE001 — non-deterministic judge ⇒ never a build failure; SKIP
@@ -455,21 +477,59 @@ def collect_results() -> list[GateResult]:
     ]
 
 
+def _write_metric(path: Path, payload: dict[str, Any]) -> None:
+    """Persist one suite's scores as a metric.json (stamped with a UTC `ran_at`), pretty-printed + sorted."""
+    import json
+    from datetime import UTC, datetime
+
+    body = {**payload, "ran_at": datetime.now(UTC).isoformat()}
+    path.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def persist_metrics(results: list[GateResult]) -> list[Path]:
+    """Write evals/classifier/metric.json and evals/rag/metric.json from the run's structured metrics.
+
+    Only suites that actually produced a score are written, so a SKIP (no live stack) never overwrites the
+    last good numbers. The classifier file carries macro-F1 + per-class F1; the RAG file merges every
+    `rag *` row that carried metrics — hit@k and MRR, plus the report-only faithfulness/answer-relevancy
+    when the judge ran — under one object with each row's PASS/FAIL/SKIP status. Returns the paths written.
+    """
+    written: list[Path] = []
+    classifier = next((r for r in results if r.name == "classifier macro-F1"), None)
+    if classifier is not None and classifier.metrics is not None:
+        _write_metric(_CLASSIFIER_METRIC, {**classifier.metrics, "status": classifier.status})
+        written.append(_CLASSIFIER_METRIC)
+
+    rag_metrics: dict[str, Any] = {}
+    rag_statuses: dict[str, str] = {}
+    for r in results:
+        if r.name.startswith("rag ") and r.metrics is not None:
+            rag_metrics.update(r.metrics)
+            rag_statuses[r.name] = r.status
+    if rag_metrics:
+        _write_metric(_RAG_METRIC, {**rag_metrics, "statuses": rag_statuses})
+        written.append(_RAG_METRIC)
+    return written
+
+
 def run() -> int:
-    """Run every gate, print a results table, and return a process exit code (non-zero iff a gate FAILed).
+    """Run every gate, print a results table, persist per-suite metric.json files, and return an exit code.
 
     Deterministic gates (classifier, red-team, redaction) always run; offline gates (RAG hit@3/MRR, agent,
     and the report-only judge) run when a live stack is reachable and SKIP otherwise. Only a FAIL on a gate
     that actually ran flips the exit code — the report-only judge rows are PASS/SKIP by construction and
     never gate — so an un-provisioned CI step still grades the deterministic safety/quality gates without
-    false failures.
+    false failures. The classifier/RAG scores are also written to metric.json (skipped suites are not).
     """
     results = collect_results()
+    written = persist_metrics(results)
 
     width = max(len(r.name) for r in results)
     print("eval gates (vs eval_thresholds.yaml):\n")
     for r in results:
         print(f"  [{r.status:4}] {r.name.ljust(width)}  {r.detail}")
+    if written:
+        print("\nwrote: " + ", ".join(str(p.relative_to(_REPO_ROOT)) for p in written))
 
     failed = [r.name for r in results if r.status == "FAIL"]
     if failed:
