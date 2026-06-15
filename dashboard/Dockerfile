@@ -15,11 +15,10 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /srv
 
 # 1) Dependency layer (cached): resolve ONLY the dashboard extra from the frozen lockfile, without the
-#    project source yet, so this layer is reused across dashboard code changes. The uv wheel cache is a
-#    BuildKit cache mount (not a layer), so downloaded wheels never bloat the image (golden rule #3).
+#    project source yet, so this layer is reused across dashboard code changes. (A BuildKit cache mount
+#    would trim the image, but Railway's builder rejects it — see the RUNBOOK image-size note.)
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --extra dashboard
+RUN uv sync --frozen --no-install-project --no-dev --extra dashboard
 
 # 2) App layer: the Streamlit package (entry app.py + auth.py + pages/). It is imported as `dashboard.*`,
 #    so it must sit as a subpackage under the workdir (streamlit run dashboard/app.py).

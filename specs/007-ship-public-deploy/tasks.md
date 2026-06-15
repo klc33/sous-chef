@@ -319,9 +319,10 @@ locally (quickstart §F; SC-007).
   0 leaks; offline RAG/agent gates skip cleanly w/o the live stack). **Image-size criterion is the
   deviation:** backend ~1.27GB / dashboard ~900MB (widget ~74MB) — over the ~500MB target because Presidio
   (spaCy) + the scikit-learn/scipy classifier-serving stack are required; <500MB isn't reachable without
-  dropping core components. Applied the free win — BuildKit uv-cache mounts in both Dockerfiles dropped the
-  images ~36%/38% (was 1.99GB/1.44GB) by keeping the wheel cache out of the layers. Accepted + documented:
-  RUNBOOK "Known deployment deviations (v0.1.0)" + reconciled the inaccurate `<500MB` claim in DESIGN.md.
+  dropping core components (backend ~1.99GB / dashboard ~1.44GB). A BuildKit uv-cache mount would trim them
+  ~36%/38% locally, but **Railway's Metal builder rejects cache mounts** (wants a proprietary cacheKey-prefixed
+  id), so the Dockerfiles keep plain `RUN uv sync`. Accepted + documented: RUNBOOK "Known deployment
+  deviations (v0.1.0)" + reconciled the inaccurate `<500MB` claim in DESIGN.md.
 - [X] T040 [P] Verify tracing-outage resilience (SC-008 / FR-011): with the deployed stack up, stop the Phoenix service and confirm `/health` still returns 200 and the demo scenario completes — tracing is non-blocking on the cook-facing request path. Depends on the live deployment (US1, T017).
   — DONE (satisfied-by-design; topology adjusted). **The literal "stop Phoenix" step is N/A:** prod runs
   `TRACING_PROVIDER=langsmith` and has **no Phoenix service** (retired for LangSmith Cloud in T017i; the

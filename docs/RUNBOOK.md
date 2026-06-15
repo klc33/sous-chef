@@ -432,14 +432,16 @@ Golden rule #3 / [`docs/DESIGN.md`](DESIGN.md) aim for images **< ~500MB**. The 
 
 | Image | Size | Driven by |
 |-------|------|-----------|
-| `backend` | **~1.27GB** | the backend venv is ~711MB: Presidio's PII stack (spaCy ~123M + `phonenumbers` ~46M + `blis` ~34M) plus the classifier-serving stack (scipy ~111M + scikit-learn ~49M + numpy ~42M). All required — Presidio is the redaction gate (golden rule #5) and scikit-learn serves the intent classifier. |
-| `dashboard` | **~900MB** | streamlit + pandas + their transitive numeric stack. |
+| `backend` | **~1.99GB** | the backend venv is ~711MB: Presidio's PII stack (spaCy ~123M + `phonenumbers` ~46M + `blis` ~34M) plus the classifier-serving stack (scipy ~111M + scikit-learn ~49M + numpy ~42M), and the uv wheel cache adds the rest. All required — Presidio is the redaction gate (golden rule #5) and scikit-learn serves the intent classifier. |
+| `dashboard` | **~1.44GB** | streamlit + pandas + their transitive numeric stack (+ uv cache). |
 | `widget` | ~74MB | nginx + the built static bundle — well under target. |
 
 Still **no torch** in any image (golden rule #3's hard line holds) and no dev/test tooling
-(`uv sync --no-dev`). The Dockerfiles keep the uv **wheel cache** out of the image via a BuildKit cache
-mount (`--mount=type=cache,target=/root/.cache/uv`), which already cut the images ~36%/38% (backend
-1.99GB→1.27GB, dashboard 1.44GB→900MB) — the leftover size is the resolved venv itself, not cache.
+(`uv sync --no-dev`). A **BuildKit cache mount** (`--mount=type=cache,target=/root/.cache/uv`) would keep
+the uv wheel cache out of the layers and cut each image ~36–38% locally — but **Railway's Metal builder
+rejects it**: it requires cache-mount ids to carry a proprietary "cacheKey prefix" (`dockerfile invalid:
+… missing the cacheKey prefix from its id`). So the Dockerfiles keep plain `RUN uv sync` and the cache
+ships in the image; reintroduce the mount only if Railway's builder gains standard BuildKit cache support.
 
 **Accepted for v0.1.0** — the images run fine on Railway and nothing in the cook journey depends on the
 ~500MB figure. **Revisit** only if image pull/boot time becomes a problem: options are a multi-stage build
