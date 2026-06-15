@@ -14,25 +14,26 @@ from collections.abc import Callable, Iterator
 import pytest
 from app.api.admin import register_admin_routers
 from app.api.deps import get_db
-from app.config import VAULT_KEY_ADMIN_API_TOKEN
+from app.config import VAULT_KEY_JWT_SIGNING_KEY
+from app.core import security
 from app.core.errors import register_error_handlers
+from app.models.operator_account import OperatorAccount
 from app.models.recipe import Ingredient, Recipe
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.orm import Session
 
-# The shared admin token the fake Vault hands back; the dashboard would present this on every call.
-_ADMIN_TOKEN = "test-admin-token"  # noqa: S105 — a test fixture value, not a real secret
-_AUTH = {"Authorization": f"Bearer {_ADMIN_TOKEN}"}
+# The HS256 signing key the fake Vault hands back; the backend verifies every operator JWT against it (008).
+_SIGNING_KEY = "test-jwt-signing-key-padded-to-min-32-bytes"  # noqa: S105 — a test fixture value
 
 
 class _FakeVault:
-    """Stand-in Vault adapter: returns the seeded admin token for the admin-token key, raising otherwise."""
+    """Stand-in Vault adapter: returns the JWT signing key for that key, raising on anything else."""
 
     def get(self, key: str) -> str:
-        """Return the fake admin token for the admin-token key (the only secret the admin API reads)."""
-        if key == VAULT_KEY_ADMIN_API_TOKEN:
-            return _ADMIN_TOKEN
+        """Return the fake signing key (the only secret the admin auth boundary reads)."""
+        if key == VAULT_KEY_JWT_SIGNING_KEY:
+            return _SIGNING_KEY
         raise KeyError(key)
 
 
@@ -94,6 +95,25 @@ def make_admin_client(db_session: Session) -> Callable[..., AsyncClient]:
     return _factory
 
 
+@pytest.fixture
+def auth_headers(db_session: Session) -> dict[str, str]:
+    """Seed an active operator account into the test session and return a Bearer header with its JWT.
+
+    The admin routes are gated by `require_operator`, which decodes the token, then re-loads the `sub`
+    account from the SAME session and requires it to be active — so the account must really exist here.
+    """
+    account = OperatorAccount(
+        username="op",
+        role="admin",
+        password_hash=security.hash_password("operator-password"),
+    )
+    account.is_active = True
+    db_session.add(account)
+    db_session.flush()
+    token = security.issue_token(account, signing_key=_SIGNING_KEY, ttl_minutes=480)
+    return {"Authorization": f"Bearer {token}"}
+
+
 def _seed_recipe(session: Session) -> None:
     """Insert one complete recipe so the corpus browse has a row to project."""
     session.add(
@@ -121,13 +141,17 @@ def _seed_recipe(session: Session) -> None:
 
 
 async def test_corpus_requires_token(make_admin_client) -> None:
-    """GET /admin/corpus is 401 without a bearer token and 403 with the wrong one — no token, no access."""
+    """GET /admin/corpus is 401 without a bearer token and 401 with an unverifiable one — no token, no access.
+
+    Under the JWT model a malformed/garbage bearer is an invalid token (bad signature), so it collapses to
+    the same generic 401 as a missing one — there is no distinct 403 for a non-JWT here (403 is role-only).
+    """
     async with make_admin_client() as client:
         missing = await client.get("/admin/corpus")
         wrong = await client.get("/admin/corpus", headers={"Authorization": "Bearer nope"})
 
     assert missing.status_code == 401
-    assert wrong.status_code == 403
+    assert wrong.status_code == 401
 
 
 async def test_metrics_requires_token(make_admin_client) -> None:
@@ -140,11 +164,11 @@ async def test_metrics_requires_token(make_admin_client) -> None:
 # ── corpus ────────────────────────────────────────────────────────────────────────────────────────
 
 
-async def test_corpus_returns_projected_page(make_admin_client, db_session) -> None:
+async def test_corpus_returns_projected_page(make_admin_client, db_session, auth_headers) -> None:
     """With a valid token, the corpus browse returns a page projecting provenance + allergen/diet tags."""
     _seed_recipe(db_session)
     async with make_admin_client() as client:
-        resp = await client.get("/admin/corpus", headers=_AUTH, params={"category": "dinner"})
+        resp = await client.get("/admin/corpus", headers=auth_headers, params={"category": "dinner"})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -160,20 +184,20 @@ async def test_corpus_returns_projected_page(make_admin_client, db_session) -> N
     assert set(card["diet_flags"]) == {"vegetarian", "pescatarian"}
 
 
-async def test_corpus_rejects_unknown_category(make_admin_client) -> None:
+async def test_corpus_rejects_unknown_category(make_admin_client, auth_headers) -> None:
     """An unknown category filter is a 400 (the five categories are fixed), not a 422 or a silent all-browse."""
     async with make_admin_client() as client:
-        resp = await client.get("/admin/corpus", headers=_AUTH, params={"category": "brunch"})
+        resp = await client.get("/admin/corpus", headers=auth_headers, params={"category": "brunch"})
     assert resp.status_code == 400
 
 
 # ── evals ─────────────────────────────────────────────────────────────────────────────────────────
 
 
-async def test_evals_run_returns_gate_rows(make_admin_client) -> None:
+async def test_evals_run_returns_gate_rows(make_admin_client, auth_headers) -> None:
     """POST /admin/evals/run returns the structured gate rows, a thresholds echo, and a timestamp."""
     async with make_admin_client() as client:
-        resp = await client.post("/admin/evals/run", headers=_AUTH)
+        resp = await client.post("/admin/evals/run", headers=auth_headers)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -192,10 +216,10 @@ async def test_evals_run_returns_gate_rows(make_admin_client) -> None:
 # ── metrics ───────────────────────────────────────────────────────────────────────────────────────
 
 
-async def test_metrics_returns_summary_shape(make_admin_client) -> None:
+async def test_metrics_returns_summary_shape(make_admin_client, auth_headers) -> None:
     """GET /admin/metrics returns the classifier + routing + gates + phoenix summary, well-formed."""
     async with make_admin_client() as client:
-        resp = await client.get("/admin/metrics", headers=_AUTH)
+        resp = await client.get("/admin/metrics", headers=auth_headers)
 
     assert resp.status_code == 200
     body = resp.json()

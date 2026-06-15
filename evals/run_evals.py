@@ -307,9 +307,14 @@ def gate_agent_tool_selection(thresholds: dict[str, Any]) -> GateResult:
         from app.repo import profiles as profiles_repo
         from app.services.user.constraint_guard import ConstraintProfile
 
-        # The agent's search tool records seen-history, which FKs to `profiles` — so the eval profile
-        # must exist before any case runs (otherwise the first tool call hits a foreign-key violation).
-        profiles_repo.ensure_exists(session, "eval-agent")
+        from evals.cook_session import ensure_demo_cook
+
+        # Authenticate the gate as the seeded demo cook (FR-020): its id is the owner key. The agent's search
+        # tool records seen-history, which FKs to `profiles`, which FKs to `cook_accounts` — so the demo cook
+        # must exist AND its profile row must be created before any case runs (else the first tool call hits a
+        # foreign-key violation). A throwaway owner string no longer satisfies the FK.
+        owner = ensure_demo_cook(session)
+        profiles_repo.ensure_exists(session, owner)
         session.commit()
 
         cases = yaml.safe_load(_AGENT_CASES.read_text(encoding="utf-8"))["cases"]
@@ -319,7 +324,7 @@ def gate_agent_tool_selection(thresholds: dict[str, Any]) -> GateResult:
             forbidden = case.get("forbidden_tools", [])
             called, restore = _record_tool_calls()
             try:
-                agent_loop.run(session, case["message"], ConstraintProfile.default(), "eval-agent", 2)
+                agent_loop.run(session, case["message"], ConstraintProfile.default(), owner, 2)
             finally:
                 restore()
             passes += int(_score_tool_case(expected, forbidden, called))

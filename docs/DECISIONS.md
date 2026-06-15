@@ -264,3 +264,82 @@ fight grounding (the cook needs the whole recipe), and force a chunk→recipe re
 hit@3 improvement on this corpus. (b) **A separate chunk vector table** — extra schema, extra writes, extra
 join, and a second thing to keep in sync with the seed corpus; rejected as unjustified complexity (P1,
 P10).
+
+# Decisions — 008 Admin-Managed Operator Accounts
+
+## D13 — Operator auth is per-user accounts + a signed JWT, not the single shared token
+
+**Decision.** Replace 004's single hardcoded operator (one `OPERATOR_USERNAME` + one Vault
+`OPERATOR_PASSWORD_HASH`) and the **static shared `ADMIN_API_TOKEN`** with **named, admin-managed accounts
+authenticated by a signed JWT**. Login ([app/api/admin/auth.py](../app/api/admin/auth.py)) verifies a
+username/password against the durable `operator_accounts` table (bcrypt hashes) and mints a short-lived
+**HS256 JWT** `{sub, role, iat, exp}` ([app/core/security.py](../app/core/security.py), signed with the Vault
+`JWT_SIGNING_KEY`, TTL `JWT_TTL_MINUTES` = 8h). The backend verifies that token and enforces the **admin-vs-user**
+split server-side in [app/api/admin_deps.py](../app/api/admin_deps.py) — `require_operator` (any valid, active
+account) vs `require_admin` (`role == 'admin'`). An admin provisions/lists/deactivates/reactivates/resets
+accounts from a dashboard **Users** page; there is **no self-service sign-up**; a first admin is
+**bootstrapped** at startup from Vault (`BOOTSTRAP_ADMIN_PASSWORD`) on an empty table (idempotent); the **last
+active admin can never be deactivated**. The three retired keys (`OPERATOR_USERNAME`, `OPERATOR_PASSWORD_HASH`,
+`ADMIN_API_TOKEN`) are removed from config, the seed script, and the Vault keyspace
+([contracts/secrets-keyspace.md](../specs/008-admin-managed-operator-accounts/contracts/secrets-keyspace.md)).
+
+**Why.** The requirement is to **grant/revoke access per person with an admin-vs-user role** — the static
+shared token structurally **cannot identify who is acting or carry a role**, which is the whole point. A
+per-user JWT makes the backend know *who* and *what role* on every call, enforces the role **in code** (not
+just hidden in the UI, FR-011), and gives **immediate revocation**: `require_operator` re-loads the `sub`
+account and re-checks `is_active` every request, so a deactivated account is denied on its next call without
+waiting for the token to expire. Auth is **constant-time** with a dummy-verify on unknown users and a single
+**generic 401**, so there is no account enumeration (FR-012). bcrypt hashes stay in the **DB row, not Vault** —
+a hash is one-way and not a recoverable secret, so Vault holds only the JWT signing key + bootstrap password.
+This is **operator-console** auth (constitution 2.0.0 sanctions it, already in the stack via
+`streamlit-authenticator`); the cook/end-user path stays the passwordless `X-Profile-ID` and is untouched
+(SC-007). PyJWT + bcrypt are tiny, torch-free libs in the **backend** group only (the dashboard image never
+hashes or mints — it just stores the JWT it is handed), so no image bloats and golden rule #3 holds.
+
+**Alternatives rejected.** (a) **Keep the single shared `ADMIN_API_TOKEN`** — fails the actual requirement
+(no per-person grant/revoke, no role, no accountability). (b) **A home-rolled HMAC bearer** — would
+re-implement JWT, worse and unreviewed. (c) **Store the role only in a client cookie** — forgeable; the role
+must be a signed claim the backend verifies. (d) **A server-side session store (Redis)** — adds a stateful
+dependency for the session when the signed JWT *is* the session (no datastore needed, and Redis is already
+optional here, D-007); deactivation immediacy is instead handled by the per-request `is_active` re-check.
+
+# Decisions — 009 Admin-Managed Cook Accounts
+
+## D14 — End-user (cook) identity is an admin-provisioned account behind total login gating, replacing the passwordless profile-ID
+
+**Decision.** Retire the passwordless **`X-Profile-ID`** cook identity and replace it with a **named,
+admin-provisioned cook account** behind **total login gating**. A cook signs in on the React widget (a
+professional login screen, **no self-signup**) via `POST /auth/login`
+([app/api/user/auth.py](../app/api/user/auth.py)), which verifies a username/password against a new
+`cook_accounts` table (bcrypt) and mints a short-lived **HS256 JWT** `{sub, typ:"cook", iat, exp}`
+([app/core/security.py](../app/core/security.py), signed with the Vault **`COOK_SESSION_KEY`**, TTL
+`COOK_JWT_TTL_MINUTES` = 8h). `require_cook` ([app/api/deps.py](../app/api/deps.py)) gates **every** cook
+endpoint (`/chat`, `/recipes*`, `/favorites*`, `/profile`); only `/auth/login` + `/health` are open. The cook
+account id (the verified token `sub`) becomes the **owner key** threaded exactly where `X-Profile-ID` was, so
+`profiles`/`favorites`/`seen_history` are re-keyed to the account (Alembic `0005`, with a `cook_accounts` FK)
+and each cook sees only their own data. An operator **admin** (008) creates/lists/deactivates/reactivates/
+resets cooks from a dashboard **Cooks** page (`/admin/cooks`, `require_admin`); a **seeded demo cook** lets CI
+and the live demo authenticate (no bypass). Enabled by **constitution 2.0.0**, which sanctions
+admin-provisioned end-user auth while still prohibiting self-service signup.
+
+**Why.** The headline value is *a user account connected to the user's favorites/profile* — the passwordless
+header structurally **cannot** authenticate anyone: any client could send any id and read/write that "owner's"
+data, so there was no real ownership, no accountability, and no way to revoke access. A signed cook session
+makes ownership **authenticated** (the owner is a verified claim, never a client-supplied header/body),
+gives **immediate revocation** (`require_cook` re-loads the `sub` cook and re-checks `is_active` every
+request, so a deactivated cook is denied on its next call), and brings the formerly-**open** chat under
+**auth** — now exercised by the safety gates on the authenticated path. The cook domain is **isolated from the
+operator domain** (FR-013): a **separate** Vault signing key **and** a `typ:"cook"` claim mean an 008 operator
+token can never be replayed as a cook session, or vice-versa. Reusing 008's `core/security` (bcrypt + JWT)
+adds **no new dependency**; bcrypt hashes stay in the **DB row, not Vault** (one-way, not a recoverable
+secret). **Total gating** (no anonymous mode) is what keeps the wall/grounding/redaction/red-team gates
+honest — even CI authenticates as a real cook rather than a bypass (SC-008).
+
+**Alternatives rejected.** (a) **Keep `X-Profile-ID`** — no authentication, no ownership, no revocation; the
+whole point is a real account. (b) **Self-service signup** — explicitly prohibited (constitution 2.0.0);
+cooks are admin-provisioned, mirroring 008. (c) **One shared signing key/claim for both operator and cook
+tokens** — blurs the two trust domains and widens blast radius if either key leaks; FR-013 demands isolation.
+(d) **Migrate the existing anonymous rows to accounts** — an anonymous `profile_id` UUID has no owner to map
+to, so this would invent owners; dropping them on the `0005` re-key (FR-015, an **irreversible** wipe — back
+up first) is the honest fresh start. (e) **A server-side session store** — the signed JWT *is* the session
+(no datastore); deactivation immediacy comes from the per-request `is_active` re-check, as in 008.

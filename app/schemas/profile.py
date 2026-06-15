@@ -1,7 +1,7 @@
 """Pydantic request/response models for the cook profile (diet, allergies, servings).
 
-Mirrors contracts/profile.openapi.yaml. The owner (profile-ID) is NEVER part of these bodies — it is
-read from the X-Profile-ID header via api/deps.py. Diet/Allergen reuse the domain StrEnums so unknown
+Mirrors contracts/profile.openapi.yaml. The owner key is NEVER part of these bodies — it is the
+authenticated cook account id resolved by `require_cook` in api/deps.py. Diet/Allergen reuse the domain StrEnums so unknown
 values are rejected at validation time (a 422/400), satisfying the "validate diet/allergens" rule.
 """
 

@@ -10,8 +10,25 @@ from __future__ import annotations
 import hvac
 from hvac.exceptions import InvalidPath
 
-from app.config import VAULT_KEY_ADMIN_API_TOKEN, Settings
+from app.config import (
+    VAULT_KEY_BOOTSTRAP_ADMIN_PASSWORD,
+    VAULT_KEY_COOK_SESSION_KEY,
+    VAULT_KEY_DEMO_COOK_PASSWORD,
+    VAULT_KEY_JWT_SIGNING_KEY,
+    Settings,
+)
 from app.core.errors import StartupConfigError
+
+# Secrets the backend cannot run without: it verifies every operator login JWT (JWT_SIGNING_KEY) and cook
+# session JWT (COOK_SESSION_KEY), and self-seeds the first admin + the demo cook on a fresh DB (the two
+# bootstrap passwords). Their absence is a startup error rather than a late failure on the first request
+# (008 + 009 — the cook gate and demo login are mandatory, no anonymous bypass).
+_REQUIRED_BACKEND_SECRETS = (
+    VAULT_KEY_JWT_SIGNING_KEY,
+    VAULT_KEY_BOOTSTRAP_ADMIN_PASSWORD,
+    VAULT_KEY_COOK_SESSION_KEY,
+    VAULT_KEY_DEMO_COOK_PASSWORD,
+)
 
 # KV v2 mount + path where scripts/seed_vault.sh writes the app's secrets.
 _KV_MOUNT = "secret"
@@ -50,15 +67,16 @@ class VaultAdapter:
                 ) from None
             self._secrets = dict(resp["data"]["data"])
             self._loaded = True
-            # The backend cannot guard /admin/* without the shared operator token, so its absence
-            # is a startup error here rather than a late failure on the first admin request. The
-            # dashboard-only secrets (password hash, cookie key) are validated by the dashboard
-            # itself, since the backend never needs them (004-evals-and-uis data-model).
-            if VAULT_KEY_ADMIN_API_TOKEN not in self._secrets:
-                raise StartupConfigError(
-                    f"Required secret '{VAULT_KEY_ADMIN_API_TOKEN}' not found in Vault "
-                    "(run `make seed` / scripts/seed_vault.sh to write operator secrets)"
-                )
+            # The backend cannot verify a login JWT or bootstrap the first admin without these, so their
+            # absence is a startup error here rather than a late failure on the first admin request. The
+            # dashboard-only secret (cookie key) is validated by the dashboard itself, since the backend
+            # never needs it (008-admin-managed-operator-accounts secrets-keyspace).
+            for _required in _REQUIRED_BACKEND_SECRETS:
+                if _required not in self._secrets:
+                    raise StartupConfigError(
+                        f"Required secret '{_required}' not found in Vault "
+                        "(run `make seed` / scripts/seed_vault.sh to write operator secrets)"
+                    )
         except StartupConfigError:
             raise
         except Exception as exc:  # hvac raises several connection/HTTP error types

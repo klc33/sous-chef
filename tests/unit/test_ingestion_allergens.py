@@ -127,3 +127,61 @@ def test_carp_substring_does_not_mistag_mascarpone() -> None:
     result = analyze(_ings("mascarpone", "sugar", "flour"), off=off)
     assert "fish" not in result["allergens"]
     assert result["is_vegetarian"] is True
+
+
+def test_title_backstops_meat_omitted_from_ingredients() -> None:
+    """A meat named only in the TITLE drops the meat-bearing diets even when the ingredient rows look veg.
+
+    The live wall-violation case: sources like "Cubano pork belly" / "hawaiian chicken salad" list only the
+    rub or the dressing, so the protein never reaches the ingredient-based detector and the recipe wrongly
+    read as vegetarian. The title is the fail-closed backstop.
+    """
+    off = FakeOFF({})
+    pork = analyze(_ings("olive oil", "garlic", "cumin", "oregano"), off=off, title="Cubano pork belly")
+    assert pork["is_vegetarian"] is False
+    assert pork["is_vegan"] is False
+    assert pork["is_pescatarian"] is False  # pork is meat → not pescatarian either
+
+    chicken = analyze(_ings("sour cream", "mayonnaise", "green onion"), off=off,
+                      title="hawaiian chicken salad appetizer")
+    assert chicken["is_vegetarian"] is False
+    assert chicken["is_pescatarian"] is False
+
+
+def test_broiler_synonym_detected_as_poultry() -> None:
+    """"broiler" is a chicken — the lexicon gap that let "evil chicken" read as vegan/vegetarian."""
+    off = FakeOFF({})
+    result = analyze(_ings("broiler", "soy sauce", "ginger", "garlic"), off=off, title="evil chicken")
+    assert result["is_vegetarian"] is False
+    assert result["is_vegan"] is False
+    assert result["is_pescatarian"] is False
+
+
+def test_title_fish_drops_vegetarian_but_keeps_pescatarian() -> None:
+    """A fish word in the title fails vegetarian/vegan closed but leaves pescatarian (seafood) intact."""
+    off = FakeOFF({})
+    result = analyze(_ings("buttermilk", "egg", "flour"), off=off, title="chicken fried fish fingers")
+    # "chicken" in the title also makes it non-pescatarian, so probe a plain-fish title for the seafood rule:
+    plain = analyze(_ings("buttermilk", "egg", "flour"), off=off, title="crispy fish fingers")
+    assert result["is_vegetarian"] is False
+    assert plain["is_vegetarian"] is False
+    assert plain["is_pescatarian"] is True  # fish is pescatarian-compatible
+
+
+def test_meat_free_title_marker_is_exempt() -> None:
+    """A deliberately meat-free dish named after meat keeps its veg flags (the title backstop is skipped).
+
+    "meatless" / "meat-free" contain the "meat" substring, so the exemption must be checked first or these
+    would flag themselves; a "vegetarian sausage" with veg ingredients must stay vegetarian.
+    """
+    off = FakeOFF({})
+    for title in ("Meatless Monday chili", "vegetarian sausage rolls", "mock duck stir fry"):
+        result = analyze(_ings("onion", "garlic", "tomato", "bean"), off=off, title=title)
+        assert result["is_vegetarian"] is True, title
+
+
+def test_derive_diet_flags_title_only_meat_overrides() -> None:
+    """Direct `derive_diet_flags` call: a meat title overrides otherwise-clean ingredients (fail-closed)."""
+    flags = derive_diet_flags([("rub", set()), ("oil", set())], certain=True, title="slow beef brisket")
+    assert flags["is_vegetarian"] is False
+    assert flags["is_pescatarian"] is False

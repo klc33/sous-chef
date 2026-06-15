@@ -3,16 +3,19 @@
 // State machine in one component (no router/store, per the constitution's plain-JSX rule): the left rail
 // holds the cook's constraints + category chips + favorites toggle; the main column shows whatever the cook
 // last did — a recipe detail, a category/browse grid, or a chat turn routed to the correct render branch.
-// Every network call goes through api/client.js (which carries X-Profile-ID and hits only VITE_API_BASE).
-// The widget is "dumb": it renders only backend-returned (already wall-filtered) data and invents nothing.
+// Since 009 the app is gated: until the cook signs in (a stored, unexpired cook-session token) it renders
+// the Login screen and nothing else; the token then rides on every call via api/client.js. The widget is
+// "dumb": it renders only backend-returned (already wall-filtered) data and invents nothing.
 
 import { useEffect, useState } from "react";
 
 import { api, ApiError } from "./api/client.js";
 import { normalize, detectCategory } from "./lib/categories.js";
+import { clearSession, getToken, getUsername } from "./lib/session.js";
 import ConstraintsForm from "./components/ConstraintsForm.jsx";
 import CategoryChips from "./components/CategoryChips.jsx";
 import ChatBox from "./components/ChatBox.jsx";
+import Login from "./components/Login.jsx";
 import RecipeCard from "./components/RecipeCard.jsx";
 import RecipeDetail from "./components/RecipeDetail.jsx";
 import Favorites from "./components/Favorites.jsx";
@@ -25,6 +28,11 @@ import SubstitutionCard from "./components/SubstitutionCard.jsx";
 const PAGE_SIZE = 12;
 
 export default function App() {
+  // Auth gate: the cook-session token (re-hydrated from storage so a refresh stays signed in) and the
+  // signed-in username for the header. While `token` is null the Login screen renders instead of the app.
+  const [token, setToken] = useState(getToken());
+  const [username, setUsername] = useState(getUsername());
+
   // The cook's constraints (mirrors /profile). Null until the first load resolves.
   const [profile, setProfile] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -70,8 +78,10 @@ export default function App() {
     }
   }
 
-  // Load the cook's constraints + favorites once on mount.
+  // Load the cook's constraints + favorites whenever a session becomes active (mount with a stored token,
+  // or right after a fresh login). Skipped while signed out so no gated call fires without a token.
   useEffect(() => {
+    if (!token) return;
     (async () => {
       try {
         const [p, favs] = await Promise.all([api.getProfile(), api.listFavorites()]);
@@ -82,7 +92,41 @@ export default function App() {
         reportError(e);
       }
     })();
+  }, [token]);
+
+  // The client dispatches "souschef:logout" when the backend rejects the token with a 401 (expired session
+  // or a deactivated cook) — drop straight back to the login screen so a revoked cook can't keep acting.
+  useEffect(() => {
+    function onLogout() {
+      setToken(null);
+      setUsername(null);
+    }
+    window.addEventListener("souschef:logout", onLogout);
+    return () => window.removeEventListener("souschef:logout", onLogout);
   }, []);
+
+  // Sign in succeeded (Login persisted the token): adopt the session so the app renders and its loader runs.
+  function handleLoggedIn(who) {
+    setError(null);
+    setToken(getToken());
+    setUsername(who);
+  }
+
+  // Sign out: clear the stored session and reset cached cook data so nothing from this cook lingers on
+  // screen, then fall back to the login gate.
+  function handleSignOut() {
+    clearSession();
+    setToken(null);
+    setUsername(null);
+    setProfile(null);
+    setFavorites([]);
+    setFavoriteIds(new Set());
+    setChatTurn(null);
+    setDetail(null);
+    setCards([]);
+    setCategory(null);
+    setError(null);
+  }
 
   // Persist edited constraints (PUT /profile), refresh the cached profile, then RE-APPLY THE WALL to
   // everything on screen. The wall is enforced server-side per request, but the widget caches the last
@@ -348,20 +392,31 @@ export default function App() {
     );
   }
 
+  // Auth gate: no valid session → the login screen is the whole app (no anonymous browsing, FR-001/FR-012).
+  if (!token) {
+    return <Login onLoggedIn={handleLoggedIn} />;
+  }
+
   return (
     <div className="app">
       <header className="app__header">
         <h1>SousChef</h1>
-        <button
-          type="button"
-          className={`link${showFavorites ? " link--active" : ""}`}
-          onClick={() => {
-            setShowFavorites((s) => !s);
-            setDetail(null);
-          }}
-        >
-          ♥ Favorites ({favorites.length})
-        </button>
+        <div className="app__header-actions">
+          <button
+            type="button"
+            className={`link${showFavorites ? " link--active" : ""}`}
+            onClick={() => {
+              setShowFavorites((s) => !s);
+              setDetail(null);
+            }}
+          >
+            ♥ Favorites ({favorites.length})
+          </button>
+          {username && <span className="app__whoami">{username}</span>}
+          <button type="button" className="link" onClick={handleSignOut}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       {error && (

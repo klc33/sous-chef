@@ -1,7 +1,7 @@
-"""ORM models for the passwordless cook: Profile, Favorite, SeenHistory.
+"""ORM models for the cook's owned data: Profile, Favorite, SeenHistory.
 
-A Profile is keyed by the opaque `X-Profile-ID` header value (never taken from a request body) and
-holds the constraints that drive the wall. Favorites are idempotent by composite PK. SeenHistory is
+A Profile is keyed by the owner key — since 009 the authenticated cook account id (never taken from a
+request body) — and holds the constraints that drive the wall. Favorites are idempotent by composite PK. SeenHistory is
 created here so the later freshness phase can build on it, but no read/write behavior is wired in this
 feature. See specs/002-catalog-wall-favorites/data-model.md.
 """

@@ -32,11 +32,11 @@ no TypeScript**) · Streamlit + streamlit-authenticator (cookie login) · Docker
 
 ## Architecture (monolith)
 One FastAPI app. A turn flows:
-`guardrails input rail → intent classifier (router) → easy: workflow | hard: bounded agent → constraint guard → guardrails output rail`.
+`require_cook (cook-session JWT) → guardrails input rail → intent classifier (router) → easy: workflow | hard: bounded agent → constraint guard → guardrails output rail`.
 
 Layering — keep it strict:
-- `app/api/` — thin HTTP. Split by audience: `api/user/*` (public, profile-scoped) and `api/admin/*`
-  (operator-auth via `admin_deps.py`).
+- `app/api/` — thin HTTP. Split by audience: `api/user/*` (cook-auth via `require_cook` in `deps.py`,
+  cook-account-scoped; `/auth/login` + `/health` open) and `api/admin/*` (operator-auth via `admin_deps.py`).
 - `app/services/` — business logic, split by audience: `services/user/` (search, rag, freshness, the
   wall, meal_plan, shopping_list, nutrition, favorites) and `services/admin/` (corpus, evals, metrics,
   ingestion, traces). Shared helpers in `services/shared/`.
@@ -72,8 +72,10 @@ Widget: `cd widget && npm install && npm run dev`. Dashboard: `uv run streamlit 
   `build_shopping_list`, `substitute_ingredient`. Every tool input is Pydantic-validated. The loop is
   bounded (capped iterations + tokens).
 - **Prompts are code** — they live in `prompts/`, version-controlled. Never hardcode prompts inline.
-- **Cook identity** is a passwordless `profile-ID` header (favorites + seen-history only). The
-  `tenant`/owner is never taken from the request body.
+- **Cook identity** is an admin-provisioned **cook account** (009): the cook signs in (no self-signup) and
+  the app is **gated** behind a cook-session JWT (`Authorization: Bearer`, `typ:"cook"`, own Vault signing
+  key). `require_cook` returns the cook account id as the **owner key** for profile/favorites/seen-history;
+  the owner is never taken from a request body or header. Only `/auth/login` + `/health` are open.
 - **Freshness**: retrieval excludes a profile's seen-history so repeated queries return new recipes;
   favorites are exempt.
 
@@ -83,7 +85,10 @@ injection/jailbreak probes must all be refused) and the **redaction** test. Then
 the running stack (`make up`).
 
 <!-- SPECKIT START -->
-Active feature: **007-ship-public-deploy**. For technologies, project structure, shell commands,
-and other context for the current work, read the plan at `specs/007-ship-public-deploy/plan.md`
-(with its `research.md`, `data-model.md`, `contracts/`, and `quickstart.md`).
+Active feature: **009-admin-managed-cook-accounts**. For technologies, project structure, shell
+commands, and other context for the current work, read the plan at
+`specs/009-admin-managed-cook-accounts/plan.md` (with its `research.md`, `data-model.md`,
+`contracts/`, and `quickstart.md`). NOTE: cook identity is moving from the passwordless `X-Profile-ID`
+to admin-provisioned cook accounts (constitution 2.0.0); update the "passwordless profile-ID" convention
+below when 009 lands. Implementation depends on feature 008 (shared `core/security` + operator admin).
 <!-- SPECKIT END -->

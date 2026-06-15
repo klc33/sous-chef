@@ -1,10 +1,11 @@
 """Integration tests for User Story 1 — browse safe recipes by category.
 
 Seeds compliant and violating recipes across several categories in a real DB, then drives the actual
-HTTP path (GET /recipes) with the cook identified only by X-Profile-ID. Asserts the wall holds
-end-to-end (a nut-allergic cook never sees a nut recipe), category purity (every returned card is in the
-requested category, SC-005), the no-constraint cook sees everything, and an all-violating category
-returns an honest empty list.
+HTTP path (GET /recipes) with the cook authenticated by a cook-session token (the `auth` fixture seeds the
+cook and returns its Bearer header). Asserts the wall holds end-to-end (a nut-allergic cook never sees a
+nut recipe), category purity (every returned card is in the requested category, SC-005), the no-constraint
+cook sees everything, an all-violating category returns an honest empty list, and an unauthenticated
+request is rejected.
 """
 
 from __future__ import annotations
@@ -15,11 +16,12 @@ import pytest
 from app.models.recipe import Ingredient, NutritionCache, Recipe
 from sqlalchemy.orm import Session
 
-# A cook with no stored profile / no constraints, and a nut-allergic cook.
-_OPEN_COOK = {"X-Profile-ID": "cook-open"}
-_NUT_COOK = {"X-Profile-ID": "cook-nut"}
+# Cook owner keys; `auth(<key>)` seeds an active cook with that id and returns its Bearer header. One cook
+# with no stored profile / no constraints, and a nut-allergic cook.
+_OPEN_COOK = "cook-open"
+_NUT_COOK = "cook-nut"
 # A cook whose stored profile sets servings to 4 (to exercise nutrition scaling on the detail path).
-_SERVINGS_COOK = {"X-Profile-ID": "cook-4"}
+_SERVINGS_COOK = "cook-4"
 
 
 def _add_recipe(
@@ -108,21 +110,21 @@ def seeded(db_session: Session) -> None:
     )
 
 
-async def _set_nut_allergy(client) -> None:
-    """Set the nut-allergic profile (peanuts + tree nuts) via the real PUT /profile path."""
+async def _set_nut_allergy(client, headers) -> None:
+    """Set the nut-allergic profile (peanuts + tree nuts) via the real PUT /profile path (authenticated)."""
     resp = await client.put(
         "/profile",
-        headers=_NUT_COOK,
+        headers=headers,
         json={"diet": "none", "allergies": ["peanuts", "tree_nuts"], "default_servings": 2},
     )
     assert resp.status_code == 200
 
 
-async def test_nut_cook_sees_only_compliant_cards(make_user_client, seeded) -> None:
+async def test_nut_cook_sees_only_compliant_cards(make_user_client, auth, seeded) -> None:
     """A nut-allergic cook browsing dinner gets only the safe recipe — the peanut one is withheld."""
     async with make_user_client() as client:
-        await _set_nut_allergy(client)
-        resp = await client.get("/recipes", params={"category": "dinner"}, headers=_NUT_COOK)
+        await _set_nut_allergy(client, auth(_NUT_COOK))
+        resp = await client.get("/recipes", params={"category": "dinner"}, headers=auth(_NUT_COOK))
 
     assert resp.status_code == 200
     body = resp.json()
@@ -136,11 +138,11 @@ async def test_nut_cook_sees_only_compliant_cards(make_user_client, seeded) -> N
     assert card["key_ingredients"] == ["carrot", "potato", "onion", "celery"]
 
 
-async def test_category_purity(make_user_client, seeded) -> None:
+async def test_category_purity(make_user_client, auth, seeded) -> None:
     """Every returned card is in the requested category (SC-005) — no lunch recipe leaks into dinner."""
     async with make_user_client() as client:
-        await _set_nut_allergy(client)
-        resp = await client.get("/recipes", params={"category": "dinner"}, headers=_NUT_COOK)
+        await _set_nut_allergy(client, auth(_NUT_COOK))
+        resp = await client.get("/recipes", params={"category": "dinner"}, headers=auth(_NUT_COOK))
 
     assert resp.status_code == 200
     cards = resp.json()["items"]
@@ -148,21 +150,21 @@ async def test_category_purity(make_user_client, seeded) -> None:
     assert all(c["category"] == "dinner" for c in cards)
 
 
-async def test_open_cook_sees_all_in_category(make_user_client, seeded) -> None:
+async def test_open_cook_sees_all_in_category(make_user_client, auth, seeded) -> None:
     """A cook with no constraints sees every recipe in the category, including the peanut one."""
     async with make_user_client() as client:
-        resp = await client.get("/recipes", params={"category": "dinner"}, headers=_OPEN_COOK)
+        resp = await client.get("/recipes", params={"category": "dinner"}, headers=auth(_OPEN_COOK))
 
     assert resp.status_code == 200
     titles = {c["title"] for c in resp.json()["items"]}
     assert titles == {"Veg Stew", "Peanut Curry"}
 
 
-async def test_all_violating_category_returns_empty(make_user_client, seeded) -> None:
+async def test_all_violating_category_returns_empty(make_user_client, auth, seeded) -> None:
     """A category whose only recipe violates the cook returns an honest empty list, not a substitute."""
     async with make_user_client() as client:
-        await _set_nut_allergy(client)
-        resp = await client.get("/recipes", params={"category": "breakfast"}, headers=_NUT_COOK)
+        await _set_nut_allergy(client, auth(_NUT_COOK))
+        resp = await client.get("/recipes", params={"category": "breakfast"}, headers=auth(_NUT_COOK))
 
     assert resp.status_code == 200
     body = resp.json()
@@ -170,7 +172,7 @@ async def test_all_violating_category_returns_empty(make_user_client, seeded) ->
     assert body["total"] == 0
 
 
-async def test_browse_is_paged(make_user_client, db_session: Session) -> None:
+async def test_browse_is_paged(make_user_client, auth, db_session: Session) -> None:
     """A category with more recipes than one page returns a page plus an honest total; later pages follow.
 
     Seeds 5 compliant lunch recipes and browses with page_size=2: the first page carries 2 cards with
@@ -191,17 +193,17 @@ async def test_browse_is_paged(make_user_client, db_session: Session) -> None:
         first = await client.get(
             "/recipes",
             params={"category": "lunch", "page": 1, "page_size": 2},
-            headers=_OPEN_COOK,
+            headers=auth(_OPEN_COOK),
         )
         last = await client.get(
             "/recipes",
             params={"category": "lunch", "page": 3, "page_size": 2},
-            headers=_OPEN_COOK,
+            headers=auth(_OPEN_COOK),
         )
         past_end = await client.get(
             "/recipes",
             params={"category": "lunch", "page": 4, "page_size": 2},
-            headers=_OPEN_COOK,
+            headers=auth(_OPEN_COOK),
         )
 
     assert first.status_code == 200
@@ -222,12 +224,13 @@ async def test_browse_is_paged(make_user_client, db_session: Session) -> None:
     assert past_body["total"] == 5
 
 
-async def test_missing_profile_id_is_rejected(make_user_client, seeded) -> None:
-    """Browsing without an X-Profile-ID header is a 400 (identity comes from the header only)."""
+async def test_unauthenticated_browse_is_rejected(make_user_client, seeded) -> None:
+    """Browsing without a cook token is a 401 (identity comes only from the verified token, FR-001/FR-012)."""
     async with make_user_client() as client:
         resp = await client.get("/recipes", params={"category": "dinner"})
 
-    assert resp.status_code == 400
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "cook_unauthorized"
 
 
 # --- User Story 2: open a recipe for full instructions and nutrition -------------------------------
@@ -276,18 +279,18 @@ def seeded_detail(db_session: Session) -> dict[str, uuid.UUID]:
 
 
 async def test_open_recipe_renders_verbatim_steps_and_scaled_nutrition(
-    make_user_client, seeded_detail
+    make_user_client, auth, seeded_detail
 ) -> None:
     """Opening a card returns its stored steps verbatim and nutrition scaled to the cook's servings."""
     async with make_user_client() as client:
         # A cook who cooks for 4 — the stored servings drive nutrition scaling (basis 2 → factor 2).
         resp = await client.put(
             "/profile",
-            headers=_SERVINGS_COOK,
+            headers=auth(_SERVINGS_COOK),
             json={"diet": "none", "allergies": [], "default_servings": 4},
         )
         assert resp.status_code == 200
-        resp = await client.get(f"/recipes/{seeded_detail['safe']}", headers=_SERVINGS_COOK)
+        resp = await client.get(f"/recipes/{seeded_detail['safe']}", headers=auth(_SERVINGS_COOK))
 
     assert resp.status_code == 200
     body = resp.json()
@@ -303,18 +306,18 @@ async def test_open_recipe_renders_verbatim_steps_and_scaled_nutrition(
     assert body["image_url"] == "https://example.test/lentil-bowl.jpg"
 
 
-async def test_violating_recipe_detail_is_404(make_user_client, seeded_detail) -> None:
+async def test_violating_recipe_detail_is_404(make_user_client, auth, seeded_detail) -> None:
     """A recipe the wall withholds returns 404 on the detail path — no bypass, no existence leak."""
     async with make_user_client() as client:
-        await _set_nut_allergy(client)
-        resp = await client.get(f"/recipes/{seeded_detail['nut']}", headers=_NUT_COOK)
+        await _set_nut_allergy(client, auth(_NUT_COOK))
+        resp = await client.get(f"/recipes/{seeded_detail['nut']}", headers=auth(_NUT_COOK))
 
     assert resp.status_code == 404
 
 
-async def test_unknown_recipe_id_is_404(make_user_client, seeded_detail) -> None:
+async def test_unknown_recipe_id_is_404(make_user_client, auth, seeded_detail) -> None:
     """A well-formed but unknown id is 404 — indistinguishable from a withheld recipe."""
     async with make_user_client() as client:
-        resp = await client.get(f"/recipes/{uuid.uuid4()}", headers=_OPEN_COOK)
+        resp = await client.get(f"/recipes/{uuid.uuid4()}", headers=auth(_OPEN_COOK))
 
     assert resp.status_code == 404

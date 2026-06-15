@@ -1,21 +1,33 @@
 """Headless smoke test for the cook widget's backend contract.
 
 Exercises every endpoint api/client.js calls — /profile (GET+PUT), /recipes (list + detail), /favorites
-(list + save + remove), and /chat — exactly as the widget does (the X-Profile-ID header, the query/body
+(list + save + remove), and /chat — exactly as the widget does (a cook-session Bearer token, the query/body
 shapes), then asserts each response carries the fields the React components actually read. This is the
 "test every query the widget tools need" check: a contract mismatch here is what would surface in the UI
 as a broken card/detail/favorite. Run against the live backend (default http://localhost:8000).
+
+The app is gated (009, total gating — no anonymous path), so the smoke FIRST signs in as the seeded demo
+cook and attaches `Authorization: Bearer` to every call, exactly as the widget does after login (FR-020).
+A repo-root `sys.path` entry lets the shared `evals.cook_session` helper resolve when run as a bare script.
 """
 from __future__ import annotations
 
 import os
-import uuid
+import pathlib
+import sys
 
 import httpx
 
+# Put the repo root on the path so `evals.cook_session` (which imports `app.*`) resolves even when this is
+# launched as `python scripts/widget_smoke.py` (sys.path[0] would otherwise be the scripts/ dir).
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from evals.cook_session import (
+    bearer_headers,  # noqa: E402 — must follow the sys.path bootstrap above
+)
+
 BASE = os.environ.get("WIDGET_BACKEND", "http://localhost:8000")
-PROFILE_ID = str(uuid.uuid4())  # the widget generates one per browser via crypto.randomUUID()
-H = {"X-Profile-ID": PROFILE_ID}
+H = bearer_headers(BASE)  # sign in as the seeded demo cook → the Bearer header every call carries
 
 _passed = 0
 _failed = 0

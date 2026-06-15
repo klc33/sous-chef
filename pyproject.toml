@@ -44,6 +44,9 @@ backend = [
   "en-core-web-sm",                  # small spaCy NER model for Presidio PII (12MB — lean-image rule, #3)
   # ── 007-ship-public-deploy: seed-corpus scripts read/write embeddings.npy (no torch) ──
   "numpy>=2.4.6",                    # load_seed_corpus.py runs in the backend image at deploy/CI/local
+  # ── 008-admin-managed-operator-accounts: operator auth seam (core/security.py; no torch) ──
+  "pyjwt>=2.13.0",                   # issue/verify the login JWT (HS256) — tiny pure-Python lib
+  "bcrypt>=5.0.0",                   # one-way password hashing for operator_accounts (cost ≈12)
 ]
 
 # ── DASHBOARD IMAGE (the Streamlit operator console) ──────────────────────────

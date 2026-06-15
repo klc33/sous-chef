@@ -28,11 +28,12 @@ from sqlalchemy.orm import Session
 # Embedding width pinned by migration 0003 — seeded vectors must match the recipes.embedding column.
 _DIM = 1536
 
-_PLAIN_COOK = {"X-Profile-ID": "chat-plain"}
-_NUT_COOK = {"X-Profile-ID": "chat-nut"}
-_FRESH_COOK = {"X-Profile-ID": "chat-fresh-a"}
-_FRESH_COOK_B = {"X-Profile-ID": "chat-fresh-b"}
-_PLAN_COOK = {"X-Profile-ID": "chat-plan"}
+# Cook owner keys; `auth(<key>)` seeds an active cook with that id and returns its Bearer header.
+_PLAIN_COOK = "chat-plain"
+_NUT_COOK = "chat-nut"
+_FRESH_COOK = "chat-fresh-a"
+_FRESH_COOK_B = "chat-fresh-b"
+_PLAN_COOK = "chat-plan"
 
 
 def _one_hot(slot: int) -> list[float]:
@@ -175,7 +176,7 @@ async def _set_allergy(client, headers: dict[str, str], allergies: list[str]) ->
 
 
 async def test_find_recipe_returns_ranked_wall_cleared_cards(
-    make_user_client, db_session, monkeypatch
+    make_user_client, auth, db_session, monkeypatch
 ) -> None:
     """find_recipe returns <=3 real cards; the peanut recipe is withheld from a nut-allergic cook (FR-008)."""
     safe_id = str(_seed_recipe(db_session, source_id="c-safe", title="Veg Stew", slot=0, allergens=[]))
@@ -185,8 +186,8 @@ async def test_find_recipe_returns_ranked_wall_cleared_cards(
     _stub_providers(monkeypatch, query_slot=0, intent="find_recipe")
 
     async with make_user_client() as client:
-        await _set_allergy(client, _NUT_COOK, ["peanuts"])
-        resp = await client.post("/chat", headers=_NUT_COOK, json={"message": "something thai for dinner"})
+        await _set_allergy(client, auth(_NUT_COOK), ["peanuts"])
+        resp = await client.post("/chat", headers=auth(_NUT_COOK), json={"message": "something thai for dinner"})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -199,15 +200,15 @@ async def test_find_recipe_returns_ranked_wall_cleared_cards(
 
 
 async def test_find_recipe_honest_empty_when_no_safe_match(
-    make_user_client, db_session, monkeypatch
+    make_user_client, auth, db_session, monkeypatch
 ) -> None:
     """When the only candidate violates the wall, the turn returns no cards and an honest reply (FR-009)."""
     _seed_recipe(db_session, source_id="c-only-nut", title="Peanut Curry", slot=0, allergens=["peanuts"])
     _stub_providers(monkeypatch, query_slot=0, intent="find_recipe")
 
     async with make_user_client() as client:
-        await _set_allergy(client, _NUT_COOK, ["peanuts"])
-        resp = await client.post("/chat", headers=_NUT_COOK, json={"message": "a nutty curry"})
+        await _set_allergy(client, auth(_NUT_COOK), ["peanuts"])
+        resp = await client.post("/chat", headers=auth(_NUT_COOK), json={"message": "a nutty curry"})
 
     body = resp.json()
     assert body["recipes"] == []
@@ -215,7 +216,7 @@ async def test_find_recipe_honest_empty_when_no_safe_match(
 
 
 async def test_nutrition_q_returns_scaled_grounded_nutrition(
-    make_user_client, db_session, monkeypatch
+    make_user_client, auth, db_session, monkeypatch
 ) -> None:
     """nutrition_q resolves the dish to a real recipe and reports its scaled nutrition (FR-034)."""
     _seed_recipe(db_session, source_id="c-veg", title="Veg Stew", slot=0, allergens=[], calories=400)
@@ -223,7 +224,7 @@ async def test_nutrition_q_returns_scaled_grounded_nutrition(
 
     async with make_user_client() as client:
         resp = await client.post(
-            "/chat", headers=_PLAIN_COOK, json={"message": "how many calories in veg stew?"}
+            "/chat", headers=auth(_PLAIN_COOK), json={"message": "how many calories in veg stew?"}
         )
 
     body = resp.json()
@@ -234,16 +235,16 @@ async def test_nutrition_q_returns_scaled_grounded_nutrition(
 
 
 async def test_nutrition_q_honest_when_dish_not_found(
-    make_user_client, db_session, monkeypatch
+    make_user_client, auth, db_session, monkeypatch
 ) -> None:
     """nutrition_q gives an honest 'couldn't find that dish' when the wall withholds every candidate."""
     _seed_recipe(db_session, source_id="c-nut2", title="Peanut Curry", slot=0, allergens=["peanuts"])
     _stub_providers(monkeypatch, query_slot=0, intent="nutrition_q")
 
     async with make_user_client() as client:
-        await _set_allergy(client, _NUT_COOK, ["peanuts"])
+        await _set_allergy(client, auth(_NUT_COOK), ["peanuts"])
         resp = await client.post(
-            "/chat", headers=_NUT_COOK, json={"message": "calories in peanut curry?"}
+            "/chat", headers=auth(_NUT_COOK), json={"message": "calories in peanut curry?"}
         )
 
     body = resp.json()
@@ -251,7 +252,7 @@ async def test_nutrition_q_honest_when_dish_not_found(
     assert body["recipes"] == []
 
 
-async def test_repeat_query_returns_fresh_recipes(make_user_client, db_session, monkeypatch) -> None:
+async def test_repeat_query_returns_fresh_recipes(make_user_client, auth, db_session, monkeypatch) -> None:
     """Repeating the same request returns different recipes — the cook's seen-history excludes the first set (US2/SC-001).
 
     Six equally-relevant safe recipes are seeded (the query embeds to a slot none occupy, so all tie and
@@ -263,9 +264,9 @@ async def test_repeat_query_returns_fresh_recipes(make_user_client, db_session, 
     _stub_providers(monkeypatch, query_slot=999, intent="find_recipe")
 
     async with make_user_client() as client:
-        await _set_allergy(client, _FRESH_COOK, [])  # create the profile (seen_history FKs to it)
-        first = await client.post("/chat", headers=_FRESH_COOK, json={"message": "a stew"})
-        second = await client.post("/chat", headers=_FRESH_COOK, json={"message": "a stew"})
+        await _set_allergy(client, auth(_FRESH_COOK), [])  # create the profile (seen_history FKs to it)
+        first = await client.post("/chat", headers=auth(_FRESH_COOK), json={"message": "a stew"})
+        second = await client.post("/chat", headers=auth(_FRESH_COOK), json={"message": "a stew"})
 
     first_ids = {c["id"] for c in first.json()["recipes"]}
     second_ids = {c["id"] for c in second.json()["recipes"]}
@@ -274,25 +275,25 @@ async def test_repeat_query_returns_fresh_recipes(make_user_client, db_session, 
     assert first_ids.isdisjoint(second_ids), "a repeat request must return recipes the cook hasn't seen"
 
 
-async def test_seen_history_is_per_cook(make_user_client, db_session, monkeypatch) -> None:
+async def test_seen_history_is_per_cook(make_user_client, auth, db_session, monkeypatch) -> None:
     """One cook's seen-history never excludes another cook's results — freshness is profile-scoped (US2)."""
     for i in range(6):
         _seed_recipe(db_session, source_id=f"iso-{i}", title=f"Soup {i}", slot=20 + i, allergens=[])
     _stub_providers(monkeypatch, query_slot=999, intent="find_recipe")
 
     async with make_user_client() as client:
-        await _set_allergy(client, _FRESH_COOK, [])  # both cooks need a profile row (seen_history FK)
-        await _set_allergy(client, _FRESH_COOK_B, [])
+        await _set_allergy(client, auth(_FRESH_COOK), [])  # both cooks need a profile row (seen_history FK)
+        await _set_allergy(client, auth(_FRESH_COOK_B), [])
         # Cook A consumes a page, building up history.
-        await client.post("/chat", headers=_FRESH_COOK, json={"message": "a soup"})
+        await client.post("/chat", headers=auth(_FRESH_COOK), json={"message": "a soup"})
         # Cook B asks the same thing for the first time and must still get a full, unaffected page.
-        cook_b = await client.post("/chat", headers=_FRESH_COOK_B, json={"message": "a soup"})
+        cook_b = await client.post("/chat", headers=auth(_FRESH_COOK_B), json={"message": "a soup"})
 
     assert len(cook_b.json()["recipes"]) == 3, "a second cook is unaffected by the first cook's history"
 
 
 async def test_plan_meals_returns_varied_plan_and_one_shopping_list(
-    make_user_client, db_session, monkeypatch
+    make_user_client, auth, db_session, monkeypatch
 ) -> None:
     """A plan_meals turn drives the bounded agent → a >=3-cuisine plan with one scaled, deduped list (US3).
 
@@ -321,8 +322,8 @@ async def test_plan_meals_returns_varied_plan_and_one_shopping_list(
     )
 
     async with make_user_client() as client:
-        await _set_allergy(client, _PLAN_COOK, [])  # create the profile (seen_history FKs to it)
-        resp = await client.post("/chat", headers=_PLAN_COOK, json={"message": "plan 3 days of dinners"})
+        await _set_allergy(client, auth(_PLAN_COOK), [])  # create the profile (seen_history FKs to it)
+        resp = await client.post("/chat", headers=auth(_PLAN_COOK), json={"message": "plan 3 days of dinners"})
 
     assert resp.status_code == 200
     body = resp.json()

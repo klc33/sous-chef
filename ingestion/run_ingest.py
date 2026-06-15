@@ -41,7 +41,7 @@ def process_one(raw: dict[str, Any], off: OpenFoodFacts) -> dict[str, Any]:
     """
     category = categorize.categorize(raw)
     ingredients = extract_ingredients.extract(raw.get("raw_ingredients", []))
-    diet_allergen = allergens.analyze(ingredients, off)
+    diet_allergen = allergens.analyze(ingredients, off, title=raw["title"])
     servings = raw.get("servings") or 1
     # Prefer the source's own per-serving nutrition (Food.com) over approximating from OFF; returns None
     # when there is neither source data nor ingredients, leaving the recipe incomplete (never surfaced).

@@ -1,10 +1,10 @@
-"""GET/PUT /profile — the passwordless cook's diet, allergies, and default servings.
+"""GET/PUT /profile — the authenticated cook's diet, allergies, and default servings.
 
-Identity is the X-Profile-ID header (via deps.require_profile_id); the owner is never read from the
-body. GET returns the permissive defaults (diet=none, no allergies, servings=2) when the cook has never
-been stored, so a brand-new profile-ID reads cleanly without a prior write. PUT validates the body
-(unknown diet/allergen rejected by the enum fields; servings >= 1) and upserts. Mirrors
-contracts/profile.openapi.yaml.
+Identity (the owner key) comes from the verified cook-session JWT via `deps.require_cook`; it is never
+read from a header or the body. GET returns the permissive defaults (diet=none, no allergies, servings=2)
+when the cook has never been stored, so a brand-new cook reads cleanly without a prior write. PUT
+validates the body (unknown diet/allergen rejected by the enum fields; servings >= 1) and upserts.
+Mirrors contracts/profile.openapi.yaml.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_profile_id
+from app.api.deps import CookId, get_db
 from app.models.profile import Profile
 from app.models.recipe import Allergen, Diet
 from app.repo import profiles as repo_profiles
@@ -22,8 +22,8 @@ from app.schemas.profile import ProfileIn, ProfileOut
 
 router = APIRouter()
 
-# Annotated dependency aliases (the modern FastAPI idiom — keeps Depends out of default values).
-ProfileId = Annotated[str, Depends(require_profile_id)]
+# Annotated dependency aliases (the modern FastAPI idiom — keeps Depends out of default values). The owner
+# key (`profile_id`) now comes from the verified cook token via `require_cook` (CookId), never a header.
 DbSession = Annotated[Session, Depends(get_db)]
 
 # The defaults a never-set profile reads as: no diet filtering, no allergies, two servings.
@@ -40,7 +40,7 @@ def _to_out(profile: Profile) -> ProfileOut:
 
 
 @router.get("/profile", response_model=ProfileOut)
-def get_profile(profile_id: ProfileId, session: DbSession) -> ProfileOut:
+def get_profile(profile_id: CookId, session: DbSession) -> ProfileOut:
     """Return the cook's stored constraints, or the permissive defaults when never set.
 
     A missing row is not an error — an unknown cook simply has nothing for the wall to enforce, so we
@@ -53,7 +53,7 @@ def get_profile(profile_id: ProfileId, session: DbSession) -> ProfileOut:
 
 
 @router.put("/profile", response_model=ProfileOut)
-def put_profile(body: ProfileIn, profile_id: ProfileId, session: DbSession) -> ProfileOut:
+def put_profile(body: ProfileIn, profile_id: CookId, session: DbSession) -> ProfileOut:
     """Validate and upsert the cook's constraints, returning the saved profile.
 
     The enum-typed body fields reject unknown diets/allergens at validation time (422) and servings is

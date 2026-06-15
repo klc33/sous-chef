@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_profile_id
+from app.api.deps import CookId, get_db
 from app.core.errors import AppError
 from app.models.recipe import Category
 from app.repo import favorites as repo_favorites
@@ -29,8 +29,8 @@ from app.services.user.constraint_guard import ConstraintProfile
 
 router = APIRouter()
 
-# Annotated dependency aliases (keeps Depends out of default values; the modern FastAPI idiom).
-ProfileId = Annotated[str, Depends(require_profile_id)]
+# Annotated dependency aliases (keeps Depends out of default values; the modern FastAPI idiom). The owner
+# key (`profile_id`) now comes from the verified cook token via `require_cook` (CookId), never a header.
 DbSession = Annotated[Session, Depends(get_db)]
 
 # Servings a never-set profile cooks for — mirrors the GET /profile default so detail nutrition scales
@@ -82,7 +82,7 @@ def _paginate(cards: list[RecipeCard], *, page: int, page_size: int) -> RecipeCa
 
 @router.get("/recipes", response_model=RecipeCardPage)
 def list_recipes(
-    profile_id: ProfileId,
+    profile_id: CookId,
     session: DbSession,
     category: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=_MIN_PAGE)] = _MIN_PAGE,
@@ -122,7 +122,7 @@ def _not_found() -> AppError:
 
 
 @router.get("/recipes/{recipe_id}", response_model=RecipeDetail)
-def get_recipe(recipe_id: str, profile_id: ProfileId, session: DbSession) -> RecipeDetail:
+def get_recipe(recipe_id: str, profile_id: CookId, session: DbSession) -> RecipeDetail:
     """Return one recipe's verbatim steps + nutrition scaled to the cook's servings, subject to the wall.
 
     Resolves the cook's ConstraintProfile and servings from the stored profile (defaults for an unknown

@@ -2896,6 +2896,7 @@ dependencies = [
 backend = [
     { name = "alembic" },
     { name = "arize-phoenix-otel" },
+    { name = "bcrypt" },
     { name = "en-core-web-sm" },
     { name = "fastapi" },
     { name = "groq" },
@@ -2909,6 +2910,7 @@ backend = [
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "pyjwt" },
     { name = "redis" },
     { name = "scikit-learn" },
     { name = "slowapi" },
@@ -2951,6 +2953,7 @@ test = [
 requires-dist = [
     { name = "alembic", marker = "extra == 'backend'" },
     { name = "arize-phoenix-otel", marker = "extra == 'backend'" },
+    { name = "bcrypt", marker = "extra == 'backend'", specifier = ">=5.0.0" },
     { name = "en-core-web-sm", marker = "extra == 'backend'", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
     { name = "fastapi", marker = "extra == 'backend'" },
     { name = "groq", marker = "extra == 'backend'", specifier = ">=1.4.0" },
@@ -2969,6 +2972,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'backend'" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt", marker = "extra == 'backend'", specifier = ">=2.13.0" },
     { name = "redis", marker = "extra == 'backend'" },
     { name = "scikit-learn", marker = "extra == 'backend'", specifier = ">=1.9.0" },
     { name = "slowapi", marker = "extra == 'backend'", specifier = ">=0.1.9" },
