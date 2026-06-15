@@ -13,6 +13,7 @@ WITHOUT ever weakening the wall. Tests assert zero violations, never a minimum s
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.infra.external.openfoodfacts import OpenFoodFacts
@@ -40,6 +41,14 @@ ALLERGEN_KEYWORDS: dict[Allergen, tuple[str, ...]] = {
     Allergen.FISH: (
         "fish", "salmon", "tuna", "cod", "anchovy", "anchovies", "haddock",
         "sardine", "mackerel", "trout", "tilapia", "halibut", "worcestershire",
+        # Species the small original list missed — a vegetarian was shown "orange roughy" and
+        # "pilchards" because neither produced a fish tag (the wall trusts these flags). All are
+        # collision-checked against the corpus so none mis-tags a safe food (e.g. "carp" is excluded
+        # because it is a substring of "mascarpone"; "eel"/"ling" because of "peel"/"boiling").
+        "roughy", "pilchard", "swordfish", "catfish", "monkfish", "snapper",
+        "pollock", "pollack", "grouper", "barramundi", "branzino", "pomfret",
+        "flounder", "whiting", "turbot", "plaice", "mahi", "bass", "perch",
+        "bream", "herring", "kipper",
     ),
     Allergen.SHELLFISH: (
         "shrimp", "prawn", "crab", "lobster", "clam", "mussel", "oyster",
@@ -76,6 +85,11 @@ _MEAT_POULTRY = (
     "kielbasa", "bratwurst", "frankfurter", "foie", "escargot", "snail",
     "quail", "pheasant", "rabbit", "tripe",
 )
+# Meat/animal-fat terms matched as WHOLE words, not substrings — for names that are a substring of a
+# safe food. "lard" (pork/beef fat) is the motivating case: a bare substring match would wrongly flag
+# "collard greens" as meat, so it is matched with word boundaries (catches "lard", not "collard").
+_MEAT_WORDS = ("lard", "tallow", "suet", "schmaltz")
+
 # Non-vegan, non-allergen animal product detected by name keyword (dairy/eggs/seafood now ride the
 # allergen tags instead — see `derive_diet_flags`).
 _NON_VEGAN_OTHER = ("honey",)
@@ -139,6 +153,25 @@ def _matches(name: str, keywords: tuple[str, ...]) -> bool:
     return any(kw in name for kw in keywords)
 
 
+def _matches_word(name: str, words: tuple[str, ...]) -> bool:
+    """Return True when any term matches the name as a WHOLE word (boundary-anchored, not a substring).
+
+    Used for collision-prone terms like "lard" that are substrings of safe foods ("collard greens"):
+    a `\\b`-anchored search matches the standalone ingredient but never the inner letters of another word.
+    """
+    return any(re.search(rf"\b{re.escape(w)}\b", name) for w in words)
+
+
+def _is_meat(name: str) -> bool:
+    """Return True when the ingredient is meat/poultry/animal-fat — substring list ∪ whole-word list.
+
+    The single meat predicate so the diet derivation and the recognition check stay in lockstep: a name
+    counts as meat if it matches the broad `_MEAT_POULTRY` substrings OR a boundary-anchored `_MEAT_WORDS`
+    term (lard/tallow/suet/schmaltz), which must not also flag safe foods that merely contain those letters.
+    """
+    return _matches(name, _MEAT_POULTRY) or _matches_word(name, _MEAT_WORDS)
+
+
 def _keyword_allergens(name: str) -> set[Allergen]:
     """Return the allergens whose keyword map matches the normalized ingredient name (no OFF)."""
     return {a for a, kws in ALLERGEN_KEYWORDS.items() if _matches(name, kws)}
@@ -155,7 +188,7 @@ def derive_diet_flags(
     allergen, so they stay name-keyword signals. Uncertainty forces every flag False so stricter diets fail
     closed. Shared by `analyze()` (live ingest) and the seed-corpus regenerator so both stay identical.
     """
-    has_meat_poultry = any(_matches(name, _MEAT_POULTRY) for name, _ in per_ingredient)
+    has_meat_poultry = any(_is_meat(name) for name, _ in per_ingredient)
     has_seafood = any(
         Allergen.FISH in tags or Allergen.SHELLFISH in tags for _, tags in per_ingredient
     )
@@ -214,7 +247,7 @@ def analyze(
         # recognized — otherwise a plain "chicken" would wrongly flip the whole recipe to uncertain.
         recognized = (
             bool(tags)
-            or _matches(name, _MEAT_POULTRY)
+            or _is_meat(name)
             or _matches(name, _KNOWN_SAFE)
             or off_recognized
         )
