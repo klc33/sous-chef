@@ -43,6 +43,10 @@ ml/artifacts/
 *.joblib
 *.pkl
 
+# ─── Eval run-artifacts (written by `make evals`, regenerated each run) ───────
+evals/classifier/metric.json
+evals/rag/metric.json
+
 # ─── Ingestion / corpus scratch data ─────────────────────────────────────────
 # Ignore the downloaded datasets but keep the README that documents what goes here.
 ingestion/data/*
