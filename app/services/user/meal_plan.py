@@ -1,19 +1,20 @@
 """Meal plan — assemble a varied, constraint-safe multi-day plan + ONE shopping list (US3 / FR-014..021).
 
-The bounded agent does the open-ended *retrieval* (it issues `search_recipes` calls across cuisines via
-`agent.loop`), but the safety-critical *assembly* is deterministic here — the wall, the ≥3-distinct-cuisine
-variety rule, the shortfall accounting, and the single consolidated shopping list are all plain Python, not
-trusted to the LLM (Principle II). The flow:
+Each day of the plan is a full set of meals — **breakfast, lunch, and dinner** — and the whole plan is
+covered by exactly one consolidated shopping list. Because the corpus tags every recipe with one fixed
+category at ingestion (`breakfast | lunch | dinner | hot_drink | cold_drink`), the assembly is a
+deterministic per-category retrieval, not an LLM guess (Principle II):
 
-  1. Run the bounded agent loop to gather a pool of wall-cleared candidate recipes (its `surfaced` rows).
-  2. If the agent under-delivered (cut off, or it just chatted), deterministically top up the pool with a
-     direct retrieval so a plan still gets built — the agent makes it smart, the fallback makes it reliable.
-  3. Greedily pick up to N days maximizing distinct KNOWN cuisines (a null/"unknown" cuisine never counts
-     toward variety); note any shortfall in length or variety.
-  4. Build exactly one deduplicated, serving-scaled shopping list over the chosen recipes.
+  1. For each meal category, run a freshness-aware, wall-cleared semantic retrieval for the cook's request,
+     asking for up to N distinct recipes (N = requested days).
+  2. Pair them up by day: day i gets the i-th breakfast, lunch, and dinner. A category that returns fewer
+     than N recipes leaves that meal empty on the later days and is owned up to in the shortfall note —
+     never padded or invented.
+  3. Build exactly one deduplicated, serving-scaled shopping list over every chosen recipe across all days.
 
-Every recipe in the plan is wall-cleared (cards come through `recipe_view`); a null cuisine is honestly
-excluded from the variety count rather than padding it.
+Every card comes through `recipe_view` (the wall choke point) and each retrieval re-applies the
+deterministic allergen wall, so a violating recipe can never reach a meal slot or the shopping list
+(golden rule #1). A null/"unknown" cuisine is honestly excluded from the variety count rather than padding it.
 """
 
 from __future__ import annotations
@@ -23,57 +24,39 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.agent import loop as agent_loop
-from app.models.recipe import Recipe
+from app.models.recipe import Category, Recipe
 from app.repo import profiles as repo_profiles
 from app.schemas.chat import MealPlan, MealPlanDay, ShoppingList
+from app.schemas.recipe import RecipeCard
 from app.services.shared import recipe_view
-from app.services.user import constraint_guard, freshness, rag, shopping_list
+from app.services.user import constraint_guard, rag, shopping_list
 from app.services.user.constraint_guard import ConstraintProfile
 
-# Default plan length and the variety target the spec asks for (≥3 distinct cuisines when the corpus allows).
-_DEFAULT_DAYS = 3
-_MIN_DISTINCT_CUISINES = 3
+# The three meal slots that make up each day of a plan, in the order they're shown.
+_MEAL_SLOTS: tuple[Category, ...] = (Category.BREAKFAST, Category.LUNCH, Category.DINNER)
+_SLOT_LABELS = {Category.BREAKFAST: "breakfast", Category.LUNCH: "lunch", Category.DINNER: "dinner"}
 
-# Upper bound on a cook-requested plan length, so an absurd ask ("plan 30 days") can't try to drain the
-# corpus or build a runaway shopping list. Requests above this are clamped down to it.
+# Default plan length when the cook names no number, and the hard cap on a single request.
+_DEFAULT_DAYS = 3
 _MAX_DAYS = 7
 
-# Small number words a cook might use for the plan length; digits are handled separately.
+# Servings an unknown cook (no stored profile) is assumed to cook for — mirrors the rest of the app.
+_DEFAULT_SERVINGS = 2
+
+# Cuisine values that do NOT count toward variety (the data-model's "unknown" bucket).
+_UNKNOWN_CUISINES = frozenset({"", "unknown", "n/a", "none", "other"})
+
+# Number words a cook might use for the plan length ("plan five dinners").
 _NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
     "couple": 2, "few": 3,
 }
-
-# "<n> day(s)/dinner(s)/meal(s)/night(s)" — e.g. "2-day", "three dinners", "a couple of meals". The count
-# is a digit or a small number word; an optional dash and "of" cover "2-day" and "a couple of meals".
+# Pull a requested count out of "<n> days/dinners/meals/nights" (digit or number word).
 _DAYS_REQUEST = re.compile(
     r"\b(\d+|one|two|three|four|five|six|seven|couple|few)\b\s*-?\s*(?:of\s+)?"
     r"(?:day|days|dinner|dinners|meal|meals|night|nights)\b",
     re.IGNORECASE,
 )
-
-
-def _parse_requested_days(message: str) -> int:
-    """Pull the requested plan length from the message; default to `_DEFAULT_DAYS`, clamped to `_MAX_DAYS`.
-
-    Recognizes "<n> day(s)/dinner(s)/meal(s)/night(s)" with <n> as a digit or a small number word
-    ("2-day", "three dinners", "a couple of meals"). When no count is stated the default applies, and any
-    parsed value is clamped to [1, `_MAX_DAYS`] so a plan can never try to span the whole corpus.
-    """
-    match = _DAYS_REQUEST.search(message)
-    if match is None:
-        return _DEFAULT_DAYS
-    token = match.group(1).lower()
-    value = int(token) if token.isdigit() else _NUMBER_WORDS.get(token, _DEFAULT_DAYS)
-    return max(1, min(value, _MAX_DAYS))
-
-# Servings an unknown cook (no stored profile) is assumed to cook for — mirrors the rest of the app.
-_DEFAULT_SERVINGS = 2
-
-# Cuisine values that do NOT count toward variety (the data-model's "unknown" bucket). A recipe with one of
-# these is still usable as a day, it just never contributes a distinct cuisine.
-_UNKNOWN_CUISINES = frozenset({"", "unknown", "n/a", "none", "other"})
 
 
 @dataclass(frozen=True)
@@ -95,58 +78,24 @@ def _known_cuisine(recipe: Recipe) -> str | None:
     return None if raw in _UNKNOWN_CUISINES else raw
 
 
-def _select_for_variety(candidates: list[Recipe], days: int) -> list[Recipe]:
-    """Greedily pick up to `days` recipes, first maximizing distinct known cuisines, then filling slots.
-
-    Pass one takes the first recipe of each not-yet-used known cuisine (so the plan spreads across cuisines
-    rather than clustering); pass two fills any remaining days from whatever is left, in order, including
-    unknown-cuisine recipes. Selection is by recipe id so a candidate is never placed on two days. Input
-    order is preserved for a deterministic, testable result.
-    """
-    selected: list[Recipe] = []
-    used_cuisines: set[str] = set()
-    chosen_ids: set[object] = set()
-
-    # Pass 1: spread across distinct known cuisines.
-    for recipe in candidates:
-        if len(selected) >= days:
-            break
-        cuisine = _known_cuisine(recipe)
-        if cuisine is not None and cuisine not in used_cuisines and recipe.id not in chosen_ids:
-            selected.append(recipe)
-            used_cuisines.add(cuisine)
-            chosen_ids.add(recipe.id)
-
-    # Pass 2: fill any leftover days with the remaining candidates (any cuisine), order preserved.
-    for recipe in candidates:
-        if len(selected) >= days:
-            break
-        if recipe.id not in chosen_ids:
-            selected.append(recipe)
-            chosen_ids.add(recipe.id)
-
-    return selected
-
-
 def _distinct_known_cuisines(recipes: list[Recipe]) -> int:
     """Count the distinct KNOWN cuisines across the chosen recipes (unknown/null never counts — FR-016)."""
     return len({c for c in (_known_cuisine(r) for r in recipes) if c is not None})
 
 
-def _shortfall_note(selected: list[Recipe], distinct: int, days: int) -> str | None:
-    """Return an honest note when the plan fell short of the requested length or ≥3-cuisine variety.
+def _parse_requested_days(message: str) -> int:
+    """Pull the requested plan length from the cook's message, clamped to [1, _MAX_DAYS]; default when absent.
 
-    Per FR-017 the plan must own up to scarcity rather than pad: too few days, or fewer than three
-    distinct cuisines when at least three were requestable. Returns None when both targets were met.
+    Reads a count expressed as a digit or a number word followed by a day/meal noun ("five dinners",
+    "3 days"). A missing or unparseable count falls back to `_DEFAULT_DAYS`, and any value is clamped so a
+    cook can't request an unboundedly long plan.
     """
-    problems: list[str] = []
-    if len(selected) < days:
-        problems.append(f"only found {len(selected)} of {days} requested days")
-    if len(selected) >= _MIN_DISTINCT_CUISINES and distinct < _MIN_DISTINCT_CUISINES:
-        problems.append(f"only {distinct} distinct cuisine(s) were available, not {_MIN_DISTINCT_CUISINES}")
-    if not problems:
-        return None
-    return "Heads up: " + "; ".join(problems) + "."
+    match = _DAYS_REQUEST.search(message)
+    if match is None:
+        return _DEFAULT_DAYS
+    token = match.group(1).lower()
+    value = int(token) if token.isdigit() else _NUMBER_WORDS.get(token, _DEFAULT_DAYS)
+    return max(1, min(value, _MAX_DAYS))
 
 
 def _resolve_servings(session: Session, profile_id: str) -> int:
@@ -155,34 +104,44 @@ def _resolve_servings(session: Session, profile_id: str) -> int:
     return profile.default_servings if profile is not None else _DEFAULT_SERVINGS
 
 
-def _gather_candidates(
+def _retrieve_slot(
     session: Session,
     message: str,
     cp: ConstraintProfile,
     profile_id: str,
-    servings: int,
+    category: Category,
     days: int,
 ) -> list[Recipe]:
-    """Collect wall-cleared candidate recipes for the plan: the agent's picks, topped up deterministically.
+    """Retrieve up to `days` fresh, wall-cleared recipes for one meal category, ordered by relevance.
 
-    Runs the bounded agent loop (which searches across cuisines through its tools) and takes the recipe
-    rows it surfaced. If that pool is thinner than the requested days — the model was cut off by a bound or
-    didn't search enough — it tops up with a direct `rag.fresh_cards` retrieval so a usable plan is still
-    produced. De-dupes by id while preserving discovery order (agent picks first).
+    Delegates to the shared freshness-aware retrieval (`rag.fresh_cards`, which excludes seen-history and
+    resets on exhaustion) filtered to this single category, then re-applies the allergen wall as a
+    belt-and-suspenders pass so the meal slot, the variety count, and the shopping list all operate on the
+    SAME safe set (golden rule #1). Returns the recipe rows; cook-facing cards are built later via the wall.
     """
-    outcome = agent_loop.run(session, message, cp, profile_id, servings)
-    candidates: list[Recipe] = list(outcome.ctx.surfaced.values())
+    rows, _cards = rag.fresh_cards(session, message, cp, profile_id, category=category, k=days)
+    return constraint_guard.filter(rows, cp)
 
-    if len(candidates) < days:
-        # Deterministic top-up: pull a fresh wall-cleared pool for the cook's request and merge it in.
-        extra, _cards = rag.fresh_cards(session, message, cp, profile_id, k=max(days, 3))
-        seen_ids = {r.id for r in candidates}
-        for recipe in extra:
-            if recipe.id not in seen_ids:
-                candidates.append(recipe)
-                seen_ids.add(recipe.id)
 
-    return candidates
+def _shortfall_note(
+    per_slot: dict[Category, list[Recipe]], actual_days: int, requested_days: int
+) -> str | None:
+    """Return an honest note when the plan fell short of the requested length or a meal slot couldn't fill.
+
+    Per FR-017 the plan owns up to scarcity rather than padding: fewer days than asked, or a breakfast/
+    lunch/dinner the corpus couldn't supply for every day. Returns None when every slot covered every day.
+    """
+    problems: list[str] = []
+    if actual_days < requested_days:
+        problems.append(f"only found enough recipes for {actual_days} of {requested_days} requested days")
+    short_meals = [
+        _SLOT_LABELS[cat] for cat in _MEAL_SLOTS if len(per_slot.get(cat, [])) < actual_days
+    ]
+    if short_meals:
+        problems.append("couldn't fill every day's " + ", ".join(short_meals))
+    if not problems:
+        return None
+    return "Heads up: " + "; ".join(problems) + "."
 
 
 def build(
@@ -193,56 +152,73 @@ def build(
     *,
     days: int | None = None,
 ) -> MealPlanResult:
-    """Build an N-day, constraint-safe, variety-maximized meal plan with exactly one shopping list.
+    """Build an N-day, constraint-safe plan with a breakfast/lunch/dinner per day and one shopping list.
 
-    The plan length is the cook's requested count parsed from `message` ("2-day", "three dinners"),
-    defaulting to `_DEFAULT_DAYS` and clamped to `_MAX_DAYS`; an explicit `days` argument overrides the
-    parse (used by callers/tests that pin a length). Resolves the cook's servings, gathers wall-cleared
-    candidates (agent + deterministic top-up), selects days to maximize distinct known cuisines, records the
-    chosen recipes to seen-history (freshness), builds the single consolidated/scaled shopping list, and
-    composes a grounded reply. The plan's cards come through `recipe_view` so the wall holds; an empty corpus
-    yields an empty plan with an honest reply rather than an invented one.
+    Resolves the cook's servings and the requested length, retrieves a fresh wall-cleared set per meal
+    category, pairs them by day (day i = the i-th breakfast/lunch/dinner), caps the length to what the
+    best-covered meal can actually fill (so no fully-empty day is shown), builds the single consolidated/
+    scaled shopping list over every chosen recipe, and composes a grounded reply. Cards come through
+    `recipe_view`, so the wall holds; an empty corpus yields an empty plan with an honest reply.
     """
-    requested_days = days if days is not None else _parse_requested_days(message)
     servings = _resolve_servings(session, profile_id)
-    candidates = _gather_candidates(session, message, cp, profile_id, servings, requested_days)
-    # Belt-and-suspenders wall pass: candidates already come from wall-cleared paths, but re-filtering here
-    # guarantees the plan's cards, cuisine count, AND shopping list all operate on the SAME safe set — so a
-    # violator can never reach the shopping list even if an upstream path regressed (golden rule #1).
-    safe_candidates = constraint_guard.filter(candidates, cp)
-    selected = _select_for_variety(safe_candidates, requested_days)
+    requested_days = days if days is not None else _parse_requested_days(message)
 
-    # Cards via the wall choke point; order matches `selected` so day numbers line up with the chosen rows.
-    cards = recipe_view.to_cards(selected, cp)
-    plan_days = [MealPlanDay(day=i + 1, recipe=card) for i, card in enumerate(cards)]
-    distinct = _distinct_known_cuisines(selected)
+    # Retrieve a fresh, wall-cleared candidate list for each meal slot independently.
+    per_slot: dict[Category, list[Recipe]] = {
+        cat: _retrieve_slot(session, message, cp, profile_id, cat, requested_days) for cat in _MEAL_SLOTS
+    }
+
+    # Show as many days as the best-covered meal can fill (capped to the request) — never an all-empty day.
+    actual_days = min(requested_days, max((len(rows) for rows in per_slot.values()), default=0))
+
+    # The recipes actually placed on a day (used for the shopping list + variety count).
+    chosen: list[Recipe] = [row for cat in _MEAL_SLOTS for row in per_slot[cat][:actual_days]]
+    # Build cards once through the wall choke point, keyed by id so slots map back regardless of filtering.
+    cards_by_id: dict[str, RecipeCard] = {c.id: c for c in recipe_view.to_cards(chosen, cp)}
+
+    def _card(row: Recipe | None) -> RecipeCard | None:
+        """Look up the wall-cleared card for a chosen recipe row (None for an unfilled slot)."""
+        return cards_by_id.get(str(row.id)) if row is not None else None
+
+    def _slot(cat: Category, i: int) -> Recipe | None:
+        """Return the i-th retrieved recipe for a meal slot, or None when that slot ran out for this day."""
+        rows = per_slot[cat]
+        return rows[i] if i < len(rows) else None
+
+    plan_days = [
+        MealPlanDay(
+            day=i + 1,
+            breakfast=_card(_slot(Category.BREAKFAST, i)),
+            lunch=_card(_slot(Category.LUNCH, i)),
+            dinner=_card(_slot(Category.DINNER, i)),
+        )
+        for i in range(actual_days)
+    ]
+
     plan = MealPlan(
         days=plan_days,
-        distinct_cuisines=distinct,
-        shortfall_note=_shortfall_note(selected, distinct, requested_days),
+        distinct_cuisines=_distinct_known_cuisines(chosen),
+        shortfall_note=_shortfall_note(per_slot, actual_days, requested_days),
     )
 
-    # Record the chosen recipes so a later plan/search stays fresh (favorites exempt; de-duped in freshness).
-    freshness.record_seen(session, profile_id, [r.id for r in selected])
-
-    shopping = shopping_list.build(selected, servings)
+    shopping = shopping_list.build(chosen, servings)
     return MealPlanResult(plan=plan, shopping_list=shopping, reply=_compose_reply(plan))
 
 
 def _compose_reply(plan: MealPlan) -> str:
-    """Compose a short grounded reply describing the built plan (titles + cuisine count + any shortfall).
+    """Compose a short grounded reply describing the built plan (day count + cuisine count + any shortfall).
 
     Drawn only from the assembled plan (real wall-cleared cards), so it never invents a dish. An empty plan
-    yields an honest "couldn't build one" message; otherwise it names the days and appends any shortfall.
+    yields an honest "couldn't build one" message; otherwise it states the coverage and appends any shortfall.
     """
     if not plan.days:
         return (
             "I couldn't put together a meal plan from the recipes that fit your preferences. "
             "Try widening the request or relaxing a filter."
         )
-    titles = ", ".join(day.recipe.title for day in plan.days)
     reply = (
-        f"Here's a {len(plan.days)}-day plan across {plan.distinct_cuisines} cuisine(s): {titles}. "
+        f"Here's a {len(plan.days)}-day plan with breakfast, lunch, and dinner for each day "
+        f"across {plan.distinct_cuisines} cuisine(s). "
         "I've also built a single shopping list covering all of it."
     )
     if plan.shortfall_note:

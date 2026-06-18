@@ -14,7 +14,6 @@ that is the whole point: the regression must prove the wired paths, not a stand-
 
 from __future__ import annotations
 
-import json
 import uuid
 from typing import Any
 
@@ -253,24 +252,17 @@ def _final_resp(content: str) -> Any:
 async def test_agent_meal_plan_path_never_surfaces_a_violating_recipe(
     make_user_client, auth, planted, monkeypatch
 ) -> None:
-    """The bounded-agent meal-plan path withholds the peanut recipe from the plan AND its shopping list (T051).
+    """The meal-plan path withholds the peanut recipe from every meal slot AND its shopping list (T051).
 
-    US3 added two more recipe surfaces — the agent's `search_recipes` tool and the assembled meal plan +
-    shopping list — both of which build through `recipe_view`/`constraint_guard`, so they inherit the wall.
-    This pins it: with the embedding/LLM mocked and the router forced to the plan_meals agent route, a
-    nut-allergic cook's plan contains the safe recipe on no day, never the peanut one, and the consolidated
-    shopping list never aggregates the peanut recipe's ingredients.
+    US3's meal plan retrieves a wall-cleared set per meal category and assembles breakfast/lunch/dinner per
+    day — every slot builds through `recipe_view`/`constraint_guard`, so it inherits the wall. This pins it:
+    with the embedding mocked and the router forced to the plan_meals route, a nut-allergic cook's plan
+    carries the safe dinner on no slot as the violator, never the peanut one, and the consolidated shopping
+    list never aggregates the peanut recipe's ingredients. (The planted recipes are both dinners, so only the
+    dinner slot fills; the peanut dinner must still be absent everywhere.)
     """
     safe_id, nut_id = str(planted["safe"]), str(planted["nut"])
     monkeypatch.setattr(embeddings, "embed_query", lambda _text: [0.1] * _DIM)
-    # Agent script: round 1 searches (surfacing the planted recipes through the wall), round 2 answers.
-    responses = iter(
-        [
-            _tool_resp([_tool_call("c1", "search_recipes", json.dumps({"query": "dinners"}))]),
-            _final_resp("Here's your plan."),
-        ]
-    )
-    monkeypatch.setattr(llm, "chat", lambda _messages, **_kwargs: next(responses))
     monkeypatch.setattr(
         router_service, "route", lambda _message: IntentRoute("plan_meals", 0.99, "agent")
     )
@@ -283,9 +275,15 @@ async def test_agent_meal_plan_path_never_surfaces_a_violating_recipe(
     assert resp.status_code == 200
     plan = resp.json()["meal_plan"]
     assert plan is not None
-    day_ids = {day["recipe"]["id"] for day in plan["days"]}
-    assert nut_id not in day_ids, "the meal-plan path put a peanut recipe on a day (wall bypassed)"
-    assert safe_id in day_ids, "the safe recipe should still appear in the plan"
+    # Collect every recipe id across all meal slots of every day.
+    slot_ids = {
+        day[slot]["id"]
+        for day in plan["days"]
+        for slot in ("breakfast", "lunch", "dinner")
+        if day.get(slot) is not None
+    }
+    assert nut_id not in slot_ids, "the meal-plan path put a peanut recipe in a meal slot (wall bypassed)"
+    assert safe_id in slot_ids, "the safe recipe should still appear in the plan"
     # The single shopping list must not aggregate the peanut recipe's ingredients either.
     list_titles = {
         title for line in resp.json()["shopping_list"]["lines"] for title in line["from_recipes"]

@@ -466,16 +466,49 @@ button[disabled] {
 }
 
 .plan__days {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
   margin-top: 12px;
+}
+
+/* One day = a labelled block holding its breakfast/lunch/dinner cards in a responsive row. */
+.plan__day {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
 }
 
 .plan__daynum {
   display: block;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
+}
+
+.plan__meals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.plan__meal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan__meal-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+.plan__meal-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+  margin: 0;
 }
 
 .shopping,

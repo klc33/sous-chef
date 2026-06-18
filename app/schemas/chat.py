@@ -36,21 +36,27 @@ class ChatRequest(BaseModel):
 
 
 class MealPlanDay(BaseModel):
-    """One day of a meal plan: a 1-based day number and the (wall-cleared) recipe chosen for it."""
+    """One day of a meal plan: a 1-based day number plus the (wall-cleared) recipe for each meal slot.
+
+    Each slot is an independent retrieved card and is optional — when the corpus can't fill a given meal
+    for this day it is left null and the plan's `shortfall_note` says so, rather than padding or inventing.
+    """
 
     day: int = Field(ge=1)
-    recipe: RecipeCard
+    breakfast: RecipeCard | None = None
+    lunch: RecipeCard | None = None
+    dinner: RecipeCard | None = None
 
 
 class MealPlan(BaseModel):
-    """A multi-day plan maximizing distinct KNOWN cuisines; `shortfall_note` set when variety/length fell short."""
+    """A multi-day plan with a breakfast/lunch/dinner per day; `shortfall_note` set when a slot/length fell short."""
 
     days: list[MealPlanDay]
     distinct_cuisines: int = Field(
-        description="Count of distinct KNOWN cuisines (>=3 when the corpus allows; 'unknown' never counts)."
+        description="Count of distinct KNOWN cuisines across all chosen recipes ('unknown' never counts)."
     )
     shortfall_note: str | None = Field(
-        default=None, description="Set when the requested length or >=3 distinct cuisines could not be met."
+        default=None, description="Set when the requested length or a per-day meal slot could not be filled."
     )
 
 
