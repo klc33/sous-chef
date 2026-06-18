@@ -50,7 +50,7 @@ export default function ChatBox({ onSend, busy }) {
           aria-label="How to use SousChef"
           aria-describedby="chat-help-tip"
         >
-          ?
+          i
         </button>
         <div className="chat-help__tip" role="tooltip" id="chat-help-tip">
           <p className="chat-help__title">Just type what you want — for example:</p>
