@@ -58,7 +58,6 @@ if [ "${IS_LOCAL}" = "1" ]; then
   # initial password, bcrypt-hashed at bootstrap (this is how CI/evals + the live demo authenticate, FR-020).
   COOK_SESSION_KEY="${COOK_SESSION_KEY:-dev-placeholder-cook-session-key}"
   DEMO_COOK_PASSWORD="${DEMO_COOK_PASSWORD:-souschef-demo}"
-  APP_SECRET="${APP_SECRET:-dev-placeholder-not-a-real-secret}"
 else
   # ── Prod: require every MANDATORY secret from the operator's shell; never invent one. Collect all
   # missing names first so the operator sees the full list in one shot (FR-014: clear, actionable).
@@ -77,9 +76,6 @@ else
   # Dormant-under-defaults keys: optional in prod, default to empty until their provider is activated.
   OPENAI_API_KEY="${OPENAI_API_KEY:-}"
   LANGSMITH_API_KEY="${LANGSMITH_API_KEY:-}"
-  # app_secret is a generic signing secret; if the operator did not export one, generate a random value
-  # rather than persist a known placeholder into prod.
-  APP_SECRET="${APP_SECRET:-$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 fi
 
 # KV v2 data path is /v1/<mount>/data/<path>. Body wraps values under "data". The key names here are
@@ -89,7 +85,7 @@ fi
 curl -sf -X POST \
   -H "X-Vault-Token: ${VAULT_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "{\"data\":{\"app_secret\":\"${APP_SECRET}\",\"GROQ_API_KEY\":\"${GROQ_API_KEY}\",\"EMBEDDINGS_API_KEY\":\"${EMBEDDINGS_API_KEY}\",\"OPENAI_API_KEY\":\"${OPENAI_API_KEY}\",\"LANGSMITH_API_KEY\":\"${LANGSMITH_API_KEY}\",\"JWT_SIGNING_KEY\":\"${JWT_SIGNING_KEY}\",\"BOOTSTRAP_ADMIN_PASSWORD\":\"${BOOTSTRAP_ADMIN_PASSWORD}\",\"DASHBOARD_COOKIE_KEY\":\"${DASHBOARD_COOKIE_KEY}\",\"COOK_SESSION_KEY\":\"${COOK_SESSION_KEY}\",\"DEMO_COOK_PASSWORD\":\"${DEMO_COOK_PASSWORD}\"}}" \
+  -d "{\"data\":{\"GROQ_API_KEY\":\"${GROQ_API_KEY}\",\"EMBEDDINGS_API_KEY\":\"${EMBEDDINGS_API_KEY}\",\"OPENAI_API_KEY\":\"${OPENAI_API_KEY}\",\"LANGSMITH_API_KEY\":\"${LANGSMITH_API_KEY}\",\"JWT_SIGNING_KEY\":\"${JWT_SIGNING_KEY}\",\"BOOTSTRAP_ADMIN_PASSWORD\":\"${BOOTSTRAP_ADMIN_PASSWORD}\",\"DASHBOARD_COOKIE_KEY\":\"${DASHBOARD_COOKIE_KEY}\",\"COOK_SESSION_KEY\":\"${COOK_SESSION_KEY}\",\"DEMO_COOK_PASSWORD\":\"${DEMO_COOK_PASSWORD}\"}}" \
   "${VAULT_ADDR}/v1/secret/data/sous-chef" >/dev/null
 
 if [ "${IS_LOCAL}" = "1" ]; then
