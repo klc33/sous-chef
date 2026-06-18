@@ -214,10 +214,12 @@ button[disabled] {
   align-items: center;
 }
 
-/* The "?" trigger — a calm round badge that doesn't compete with the Send button. */
-.chat-help__trigger {
+/* The "?" trigger — a calm round badge that doesn't compete with the Send button. Scoped under .chatbox
+   so it outranks the generic `.chatbox button` accent style (which would otherwise paint it like Send). */
+.chatbox .chat-help__trigger {
   width: 32px;
   height: 32px;
+  padding: 0;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -226,7 +228,7 @@ button[disabled] {
   line-height: 1;
 }
 
-.chat-help__trigger:hover,
+.chatbox .chat-help__trigger:hover,
 .chat-help:focus-within .chat-help__trigger {
   color: var(--accent);
   border-color: var(--accent);
