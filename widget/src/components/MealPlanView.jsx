@@ -15,8 +15,10 @@ const SLOTS = [
   ["dinner", "Dinner"],
 ];
 
-// `plan` is a MealPlan DTO; `onOpen`/`onToggleFavorite` thread through to each meal's card.
-export default function MealPlanView({ plan, onOpen, onToggleFavorite }) {
+// `plan` is a MealPlan DTO; `onOpen`/`onToggleFavorite` thread through to each meal's card. `favoriteIds`
+// is the set of saved recipe ids so each meal's heart reflects (and instantly flips) its favorite state —
+// without it the plan's hearts would never fill. Defaults to an empty set so the component is safe alone.
+export default function MealPlanView({ plan, onOpen, onToggleFavorite, favoriteIds = new Set() }) {
   return (
     <section className="plan">
       <header className="plan__head">
@@ -36,7 +38,12 @@ export default function MealPlanView({ plan, onOpen, onToggleFavorite }) {
                 <div className="plan__meal" key={key}>
                   <span className="plan__meal-label">{label}</span>
                   {d[key] ? (
-                    <RecipeCard recipe={d[key]} onOpen={onOpen} onToggleFavorite={onToggleFavorite} />
+                    <RecipeCard
+                      recipe={d[key]}
+                      onOpen={onOpen}
+                      onToggleFavorite={onToggleFavorite}
+                      isFavorite={favoriteIds.has(d[key].id)}
+                    />
                   ) : (
                     <p className="plan__meal-empty">No {label.toLowerCase()} recipe available.</p>
                   )}

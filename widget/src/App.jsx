@@ -362,6 +362,7 @@ export default function App() {
             plan={turn.meal_plan}
             onOpen={handleOpen}
             onToggleFavorite={handleToggleFavorite}
+            favoriteIds={favoriteIds}
           />
           {turn.shopping_list && <ShoppingList list={turn.shopping_list} />}
         </>
