@@ -96,3 +96,6 @@ desktop.ini
 # ─── Claude Code / agent folders (may hold auth tokens — see init security tip)
 .claude/settings.local.json
 .claude/.credentials.json
+
+# Local demo notes — contains live credentials, never commit
+demo.md

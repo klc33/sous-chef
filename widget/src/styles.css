@@ -207,6 +207,85 @@ button[disabled] {
   background: #fff;
 }
 
+/* ── Chat help tooltip (hover/focus "how do I use this?") ───────────────────────── */
+.chat-help {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* The "?" trigger — a calm round badge that doesn't compete with the Send button. */
+.chat-help__trigger {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chat-help__trigger:hover,
+.chat-help:focus-within .chat-help__trigger {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The popup card. Hidden until the cook hovers the "?" (mouse) or tabs to it (keyboard/touch).
+   Anchored below the trigger and pulled left so it never spills off the right edge. */
+.chat-help__tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 320px;
+  max-width: 80vw;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+}
+
+.chat-help:hover .chat-help__tip,
+.chat-help:focus-within .chat-help__tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.chat-help__title {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.chat-help__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-help__what {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.chat-help__example {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 /* ── Recipe grid + cards ────────────────────────────────────────────────────── */
 .grid {
   display: grid;
