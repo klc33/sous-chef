@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import time
 from datetime import UTC, datetime, timedelta
 
 import extra_streamlit_components as stx
@@ -68,10 +69,14 @@ def _backend_base_url() -> str:
 
 
 def _cookie_manager() -> stx.CookieManager:
-    """Build the browser-cookie manager (rebuilt each run, like streamlit-authenticator's own).
+    """Build the browser-cookie manager and MOUNT its component for this run (call exactly once per run).
 
-    A stable `key` keeps Streamlit from registering a new component id on every rerun. The manager is what
-    actually writes/deletes the cookie in the browser; reads go through `st.context.cookies` for reliability.
+    A stable `key` keeps Streamlit from registering a new component id on every rerun; instantiating it more
+    than once in a single run with that same key would raise a duplicate-widget error, so `require_login`
+    creates it once at the top of the run and threads the instance into `_render_login`/`_clear_session`
+    rather than each of them building their own. Mounting it every run (not just on the login/logout paths)
+    is what lets a queued `set`/`delete` actually flush to the browser. The manager is what writes/deletes
+    the cookie; reads go through `st.context.cookies` for reliability.
     """
     return stx.CookieManager(key="souschef_operator_cookies")
 
@@ -146,22 +151,26 @@ def _current_session() -> bool:
     return _hydrate_from_cookie()
 
 
-def _clear_session() -> None:
-    """Drop the in-memory session and delete the browser cookie (sign-out / expiry)."""
+def _clear_session(cookie_manager: stx.CookieManager) -> None:
+    """Drop the in-memory session and delete the browser cookie (sign-out / expiry).
+
+    Uses the run's already-mounted `cookie_manager` (built once in `require_login`) so the delete is
+    issued through the same component instance — re-instantiating it here would trip the duplicate-key guard.
+    """
     for key in (_SS_TOKEN, _SS_USERNAME, _SS_ROLE):
         st.session_state.pop(key, None)
     # No cookie to delete (already absent) is a no-op — a sign-out from a cookieless session is fine.
     with contextlib.suppress(KeyError):
-        _cookie_manager().delete(_COOKIE_NAME)
+        cookie_manager.delete(_COOKIE_NAME)
 
 
-def _render_login() -> None:
+def _render_login(cookie_manager: stx.CookieManager) -> None:
     """Render the professional login form and authenticate against the backend; NO sign-up control.
 
     On submit, POSTs the credentials to `POST /admin/auth/login`. A 200 stores the minted JWT + identity in
-    session state, writes the signed refresh cookie, and reruns into the console. Any failure shows the
-    backend's single generic message (no enumeration). There is deliberately no account-creation path here —
-    accounts are provisioned only by an admin on the Users page.
+    session state, writes the signed refresh cookie through the run's mounted `cookie_manager`, and reruns
+    into the console. Any failure shows the backend's single generic message (no enumeration). There is
+    deliberately no account-creation path here — accounts are provisioned only by an admin on the Users page.
     """
     st.markdown("## 🍳 SousChef — Operator Console")
     st.caption("Sign in with your operator account to continue.")
@@ -191,11 +200,16 @@ def _render_login() -> None:
     st.session_state[_SS_USERNAME] = body["username"]
     st.session_state[_SS_ROLE] = body["role"]
     cookie_key = _vault_secrets()[_KEY_COOKIE_KEY]
-    _cookie_manager().set(
+    cookie_manager.set(
         _COOKIE_NAME,
         _encode_cookie(body["access_token"], body["username"], body["role"], cookie_key),
-        expires_at=datetime.now() + timedelta(days=_COOKIE_EXPIRY_DAYS),
+        expires_at=datetime.now(UTC) + timedelta(days=_COOKIE_EXPIRY_DAYS),
     )
+    # `CookieManager.set` only QUEUES a frontend write; it flushes on the component's next round-trip. An
+    # immediate `st.rerun()` aborts this run before that happens, so the cookie never reaches the browser and
+    # a later hard refresh (which wipes session_state) finds no cookie to re-hydrate from → spurious logout.
+    # Yield briefly so the write flushes before we rerun into the console.
+    time.sleep(0.3)
     st.rerun()
 
 
@@ -206,8 +220,12 @@ def require_login() -> str:
     sidebar identity + sign-out and returns the operator's username; otherwise it shows the login form and
     `st.stop()`s so no page body runs unauthorized.
     """
+    # Mount the cookie component ONCE per run, up front, so a queued set/delete has a live component to
+    # flush through; the same instance is threaded into the login/logout helpers (re-instantiating it with
+    # the same key would trip Streamlit's duplicate-widget guard).
+    cookie_manager = _cookie_manager()
     if not _current_session():
-        _render_login()
+        _render_login(cookie_manager)
         st.stop()
 
     username = st.session_state[_SS_USERNAME]
@@ -215,7 +233,7 @@ def require_login() -> str:
     with st.sidebar:
         st.caption(f"Signed in as **{username}** · _{role}_")
         if st.button("Log out"):
-            _clear_session()
+            _clear_session(cookie_manager)
             st.rerun()
     return username
 
