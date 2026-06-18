@@ -214,23 +214,27 @@ button[disabled] {
   align-items: center;
 }
 
-/* The "?" trigger — a calm round badge that doesn't compete with the Send button. Scoped under .chatbox
-   so it outranks the generic `.chatbox button` accent style (which would otherwise paint it like Send). */
+/* The info "i" trigger — a soft filled circular badge (the familiar ⓘ shape), not competing with Send.
+   Scoped under .chatbox so it outranks the generic `.chatbox button` accent style. */
 .chatbox .chat-help__trigger {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
+  background: #f3ece6; /* soft warm fill so it reads as a filled info dot, on-palette */
+  color: var(--accent);
+  font-family: Georgia, "Times New Roman", serif; /* the classic upright-serif info "i" */
+  font-style: italic;
   font-weight: 700;
+  font-size: 1rem;
   line-height: 1;
 }
 
 .chatbox .chat-help__trigger:hover,
 .chat-help:focus-within .chat-help__trigger {
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
   border-color: var(--accent);
 }
 
