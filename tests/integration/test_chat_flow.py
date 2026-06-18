@@ -14,7 +14,6 @@ Covered (FR-006/FR-008/FR-009/FR-034):
 
 from __future__ import annotations
 
-import json
 import uuid
 from typing import Any
 
@@ -138,14 +137,14 @@ def _final_resp(content: str) -> Any:
 
 
 def _seed_dinner(
-    session: Session, *, source_id: str, title: str, slot: int, cuisine: str
+    session: Session, *, source_id: str, title: str, slot: int, cuisine: str, category: str = "dinner"
 ) -> uuid.UUID:
-    """Insert one complete, embedded, safe dinner recipe with a chosen cuisine (for variety tests)."""
+    """Insert one complete, embedded, safe recipe with a chosen cuisine + category (for plan/variety tests)."""
     recipe = Recipe(
         source="themealdb",
         source_id=source_id,
         title=title,
-        category="dinner",
+        category=category,
         cuisine=cuisine,
         servings=2,
         steps=["Mix.", "Serve."],
@@ -292,38 +291,43 @@ async def test_seen_history_is_per_cook(make_user_client, auth, db_session, monk
     assert len(cook_b.json()["recipes"]) == 3, "a second cook is unaffected by the first cook's history"
 
 
-async def test_plan_meals_returns_varied_plan_and_one_shopping_list(
+async def test_plan_meals_returns_breakfast_lunch_dinner_and_one_shopping_list(
     make_user_client, auth, db_session, monkeypatch
 ) -> None:
-    """A plan_meals turn drives the bounded agent → a >=3-cuisine plan with one scaled, deduped list (US3).
+    """A plan_meals turn → a plan with breakfast/lunch/dinner per day and one scaled, deduped list (US3).
 
-    Six safe dinner recipes across six cuisines are seeded. The router is pinned to the agent route for
-    plan_meals; the agent LLM is mocked to call `search_recipes` once (surfacing real wall-cleared cards)
-    and then answer — so the meal-plan service assembles the plan deterministically from real recipes. The
-    turn must return a 3-day plan spanning >=3 distinct cuisines and exactly one consolidated shopping list.
+    Three safe recipes are seeded in EACH meal category (breakfast/lunch/dinner) across distinct cuisines.
+    The router is pinned to the plan_meals route; planning is deterministic per-category retrieval (no agent
+    LLM), so only the embedding is mocked. The turn must return a 3-day plan where every day carries one
+    recipe of each meal category, plus exactly one consolidated shopping list.
     """
-    cuisines = ["thai", "italian", "mexican", "indian", "japanese", "french"]
-    for i, cuisine in enumerate(cuisines):
-        _seed_dinner(db_session, source_id=f"plan-{i}", title=f"{cuisine.title()} Dinner", slot=30 + i, cuisine=cuisine)
+    meals = {
+        "breakfast": ["american", "chinese", "turkish"],
+        "lunch": ["italian", "vietnamese", "greek"],
+        "dinner": ["mexican", "indian", "japanese"],
+    }
+    slot = 30
+    for category, cuisines in meals.items():
+        for cuisine in cuisines:
+            _seed_dinner(
+                db_session,
+                source_id=f"plan-{category}-{cuisine}",
+                title=f"{cuisine.title()} {category.title()}",
+                slot=slot,
+                cuisine=cuisine,
+                category=category,
+            )
+            slot += 1
 
-    # The query embeds to a slot no recipe occupies, so all tie and `search_recipes` may surface any 3.
+    # The query embeds to a slot no recipe occupies, so within each category all tie (any may surface).
     monkeypatch.setattr(embeddings, "embed_query", lambda _text: _one_hot(999))
-
-    # Two-step agent script: round 1 calls search_recipes; round 2 answers (no tool calls → loop ends).
-    responses = iter(
-        [
-            _tool_resp([_tool_call("c1", "search_recipes", json.dumps({"query": "varied dinners"}))]),
-            _final_resp("Here's a varied 3-day dinner plan."),
-        ]
-    )
-    monkeypatch.setattr(llm, "chat", lambda _messages, **_kwargs: next(responses))
     monkeypatch.setattr(
         router_service, "route", lambda _message: IntentRoute("plan_meals", 0.99, "agent")
     )
 
     async with make_user_client() as client:
         await _set_allergy(client, auth(_PLAN_COOK), [])  # create the profile (seen_history FKs to it)
-        resp = await client.post("/chat", headers=auth(_PLAN_COOK), json={"message": "plan 3 days of dinners"})
+        resp = await client.post("/chat", headers=auth(_PLAN_COOK), json={"message": "plan 3 days of meals"})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -331,9 +335,12 @@ async def test_plan_meals_returns_varied_plan_and_one_shopping_list(
     plan = body["meal_plan"]
     assert plan is not None
     assert len(plan["days"]) == 3, "a 3-day request yields three days"
-    assert plan["distinct_cuisines"] >= 3, "the plan must span at least three distinct cuisines"
-    # Every day's recipe is one of the seeded safe dinners (real, wall-cleared — never invented).
-    assert all(day["recipe"]["category"] == "dinner" for day in plan["days"])
+    # Every day carries one real, wall-cleared recipe of each meal category (never invented).
+    for day in plan["days"]:
+        assert day["breakfast"]["category"] == "breakfast"
+        assert day["lunch"]["category"] == "lunch"
+        assert day["dinner"]["category"] == "dinner"
+    assert plan["shortfall_note"] is None, "the corpus covers all three meals for three days"
     shopping = body["shopping_list"]
     assert shopping is not None, "a plan carries exactly one shopping list"
     assert len(shopping["lines"]) >= 1

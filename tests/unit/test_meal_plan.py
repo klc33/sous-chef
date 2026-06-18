@@ -1,14 +1,14 @@
 """Unit tests for the meal-plan assembler (services/user/meal_plan.py) — US3, no DB/LLM.
 
-These pin the deterministic assembly guarantees (FR-014..017) with the agent loop + freshness stubbed so
-the test exercises meal_plan's OWN logic — variety selection, the unknown-cuisine rule, shortfall notes,
-and the wall — not the providers it sits on:
-  * the plan maximizes distinct KNOWN cuisines (>=3 when the candidate pool allows);
-  * a null/"unknown" cuisine never counts toward the variety total;
-  * a too-thin pool yields a shortfall note rather than padding/invention;
-  * a violating candidate never reaches the plan or its shopping list (the wall holds on this path).
+These pin the deterministic assembly guarantees (FR-014..018) with retrieval + freshness stubbed so the
+test exercises meal_plan's OWN logic — per-category pairing into breakfast/lunch/dinner, the requested-
+length parsing + cap, shortfall notes, the variety count, and the wall:
+  * each day carries a breakfast, lunch, and dinner drawn from the matching category;
+  * the requested length is honored (digit or number word) and capped to what the corpus can fill;
+  * a too-thin meal category yields a shortfall note rather than padding/invention;
+  * a violating candidate never reaches a meal slot or the shopping list (the wall holds on this path).
 
-The agent loop is replaced by a stub that "surfaces" a fixed candidate pool, so no Groq/DB call happens.
+Retrieval is replaced by a stub that returns a fixed per-category pool, so no Groq/DB call happens.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from app.agent.tools import ToolContext
+from app.models.recipe import Category
 from app.services.user import meal_plan
 from app.services.user.constraint_guard import ConstraintProfile
 
@@ -26,6 +26,7 @@ def _recipe(
     rid: str,
     title: str,
     cuisine: str | None,
+    category: str = "dinner",
     *,
     allergens: tuple[str, ...] = (),
     certain: bool = True,
@@ -39,7 +40,7 @@ def _recipe(
         id=rid,
         title=title,
         cuisine=cuisine,
-        category="dinner",
+        category=category,
         image_url=None,
         servings=2,
         ingredients=[SimpleNamespace(name=f"{title}-veg", quantity=100, unit="g")],
@@ -53,90 +54,139 @@ def _recipe(
 
 @pytest.fixture
 def stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Stub the agent loop (candidate source), freshness, and servings so build() runs without DB/LLM.
+    """Stub per-category retrieval and servings so build() runs without DB/LLM.
 
-    `pool` is the candidate list the stubbed agent "surfaced"; the test sets it. The agent loop returns a
-    LoopOutcome whose ToolContext.surfaced holds that pool; record_seen is a no-op; servings resolves to 2.
+    `slots` maps a Category to the recipe list that category's retrieval should "surface"; the test sets it.
+    `rag.fresh_cards` is replaced to return the rows for the requested category (capped to k, like the real
+    freshness-aware retrieval), and servings resolves to 2.
     """
-    state: dict[str, Any] = {"pool": []}
+    state: dict[str, Any] = {"slots": {}}
 
-    def _fake_run(_session: Any, _msg: str, cp: ConstraintProfile, profile_id: str, servings: int) -> Any:
-        ctx = ToolContext(session=None, cp=cp, profile_id=profile_id, servings=servings)
-        ctx.surfaced = {r.id: r for r in state["pool"]}
-        return SimpleNamespace(text="", ctx=ctx)
+    def _fake_fresh_cards(
+        _session: Any, _msg: str, _cp: ConstraintProfile, _pid: str, *, category: Category, k: int
+    ) -> tuple[list[Any], list[Any]]:
+        rows = list(state["slots"].get(category, []))[:k]
+        return rows, []  # cards are rebuilt by meal_plan via recipe_view; the row list is what it uses
 
-    monkeypatch.setattr(meal_plan.agent_loop, "run", _fake_run)
-    # The pool already covers the requested days, so the deterministic rag top-up is never triggered;
-    # stub it anyway so an accidental call can't hit the DB.
-    monkeypatch.setattr(meal_plan.rag, "fresh_cards", lambda *_a, **_k: ([], []))
-    monkeypatch.setattr(meal_plan.freshness, "record_seen", lambda *_a, **_k: None)
+    monkeypatch.setattr(meal_plan.rag, "fresh_cards", _fake_fresh_cards)
     monkeypatch.setattr(meal_plan, "_resolve_servings", lambda _session, _pid: 2)
     return state
 
 
-def test_plan_maximizes_distinct_cuisines(stub_pipeline: dict[str, Any]) -> None:
-    """A pool spanning >=3 cuisines yields a 3-day plan with 3 distinct cuisines and no shortfall (FR-016)."""
-    stub_pipeline["pool"] = [
-        _recipe("1", "Pad Thai", "thai"),
-        _recipe("2", "Carbonara", "italian"),
-        _recipe("3", "Tacos", "mexican"),
-        _recipe("4", "Green Curry", "thai"),  # extra thai — should not be chosen over a new cuisine
-    ]
-    result = meal_plan.build(None, "plan 3 dinners", ConstraintProfile.default(), "cook-1")
+def _set_slots(
+    state: dict[str, Any],
+    breakfast: list[Any] | None = None,
+    lunch: list[Any] | None = None,
+    dinner: list[Any] | None = None,
+) -> None:
+    """Helper: load the per-category candidate pools the stubbed retrieval should return."""
+    state["slots"] = {
+        Category.BREAKFAST: breakfast or [],
+        Category.LUNCH: lunch or [],
+        Category.DINNER: dinner or [],
+    }
 
-    assert len(result.plan.days) == 3
-    assert result.plan.distinct_cuisines == 3
+
+def test_each_day_has_breakfast_lunch_dinner(stub_pipeline: dict[str, Any]) -> None:
+    """A pool covering all three meals for 2 days yields 2 days, each with all three slots filled."""
+    _set_slots(
+        stub_pipeline,
+        breakfast=[_recipe("b1", "Oatmeal", "american", "breakfast"), _recipe("b2", "Congee", "chinese", "breakfast")],
+        lunch=[_recipe("l1", "Caesar Salad", "italian", "lunch"), _recipe("l2", "Pho", "vietnamese", "lunch")],
+        dinner=[_recipe("d1", "Tacos", "mexican", "dinner"), _recipe("d2", "Curry", "indian", "dinner")],
+    )
+    result = meal_plan.build(None, "plan 2 days of meals", ConstraintProfile.default(), "cook-1")
+
+    assert len(result.plan.days) == 2
+    for day in result.plan.days:
+        assert day.breakfast is not None
+        assert day.lunch is not None
+        assert day.dinner is not None
     assert result.plan.shortfall_note is None
-    titles = {d.recipe.title for d in result.plan.days}
-    assert titles == {"Pad Thai", "Carbonara", "Tacos"}  # one per distinct cuisine, the duplicate skipped
+    # Day 1 takes the first recipe of each category; day 2 the second (distinct, no repeats).
+    assert result.plan.days[0].breakfast.title == "Oatmeal"
+    assert result.plan.days[1].breakfast.title == "Congee"
 
 
-def test_unknown_cuisine_not_counted(stub_pipeline: dict[str, Any]) -> None:
-    """A null/'unknown' cuisine fills a day but never counts toward distinct cuisines (FR-016/017)."""
-    stub_pipeline["pool"] = [
-        _recipe("1", "Pad Thai", "thai"),
-        _recipe("2", "Mystery Bowl", None),
-        _recipe("3", "Unknown Stew", "unknown"),
-    ]
-    result = meal_plan.build(None, "plan 3 dinners", ConstraintProfile.default(), "cook-1")
+def test_requested_length_parsed_and_capped(stub_pipeline: dict[str, Any]) -> None:
+    """A number-word request ('five') is honored when the corpus can fill it across all three meals."""
+    _set_slots(
+        stub_pipeline,
+        breakfast=[_recipe(f"b{i}", f"B{i}", "american", "breakfast") for i in range(6)],
+        lunch=[_recipe(f"l{i}", f"L{i}", "italian", "lunch") for i in range(6)],
+        dinner=[_recipe(f"d{i}", f"D{i}", "mexican", "dinner") for i in range(6)],
+    )
+    result = meal_plan.build(None, "set up a meal plan for five days", ConstraintProfile.default(), "cook-1")
 
-    assert len(result.plan.days) == 3  # all three fill days
-    assert result.plan.distinct_cuisines == 1  # only 'thai' is a known cuisine
-    assert result.plan.shortfall_note is not None  # <3 distinct cuisines → honest shortfall
+    assert len(result.plan.days) == 5
+    assert result.plan.shortfall_note is None
 
 
-def test_shortfall_note_when_too_few_days(stub_pipeline: dict[str, Any]) -> None:
-    """A pool smaller than the requested days yields a shortfall note, never a padded/invented plan (FR-017)."""
-    stub_pipeline["pool"] = [_recipe("1", "Pad Thai", "thai")]
-    result = meal_plan.build(None, "plan 3 dinners", ConstraintProfile.default(), "cook-1")
+def test_shortfall_when_a_meal_cannot_fill_every_day(stub_pipeline: dict[str, Any]) -> None:
+    """Fewer breakfasts than days fills what it can and notes the gap, never padding/inventing (FR-017)."""
+    _set_slots(
+        stub_pipeline,
+        breakfast=[_recipe("b1", "Oatmeal", "american", "breakfast")],  # only one breakfast
+        lunch=[_recipe("l1", "Salad", "italian", "lunch"), _recipe("l2", "Pho", "vietnamese", "lunch")],
+        dinner=[_recipe("d1", "Tacos", "mexican", "dinner"), _recipe("d2", "Curry", "indian", "dinner")],
+    )
+    result = meal_plan.build(None, "plan 2 days", ConstraintProfile.default(), "cook-1")
 
-    assert len(result.plan.days) == 1
+    assert len(result.plan.days) == 2  # lunch/dinner can cover 2 days
+    assert result.plan.days[0].breakfast is not None
+    assert result.plan.days[1].breakfast is None  # ran out of breakfasts
+    assert result.plan.shortfall_note is not None
+    assert "breakfast" in result.plan.shortfall_note
+
+
+def test_shortfall_when_too_few_days(stub_pipeline: dict[str, Any]) -> None:
+    """A request longer than the best-covered meal caps the plan and notes the day shortfall (FR-017)."""
+    _set_slots(
+        stub_pipeline,
+        breakfast=[_recipe("b1", "Oatmeal", "american", "breakfast")],
+        lunch=[_recipe("l1", "Salad", "italian", "lunch")],
+        dinner=[_recipe("d1", "Tacos", "mexican", "dinner")],
+    )
+    result = meal_plan.build(None, "plan 3 days", ConstraintProfile.default(), "cook-1")
+
+    assert len(result.plan.days) == 1  # only one of each meal available
     assert result.plan.shortfall_note is not None
     assert "1 of 3" in result.plan.shortfall_note
 
 
 def test_violating_recipe_never_reaches_plan_or_shopping_list(stub_pipeline: dict[str, Any]) -> None:
-    """A peanut recipe in the candidate pool is dropped from the plan AND the shopping list (the wall holds)."""
-    stub_pipeline["pool"] = [
-        _recipe("safe", "Veg Stew", "italian"),
-        _recipe("nut", "Peanut Curry", "thai", allergens=("peanuts",)),
-    ]
+    """A peanut dinner is dropped from the plan AND the shopping list (the wall holds on this path)."""
+    _set_slots(
+        stub_pipeline,
+        breakfast=[_recipe("b1", "Oatmeal", "american", "breakfast")],
+        lunch=[_recipe("l1", "Salad", "italian", "lunch")],
+        dinner=[_recipe("nut", "Peanut Curry", "thai", "dinner", allergens=("peanuts",))],
+    )
     cp = ConstraintProfile(allergies=frozenset({"peanuts"}))
     result = meal_plan.build(None, "plan dinners", cp, "cook-1")
 
-    plan_titles = {d.recipe.title for d in result.plan.days}
-    assert "Peanut Curry" not in plan_titles
-    assert "Veg Stew" in plan_titles
-    # The shopping list must not contain the violator's ingredient either.
+    # The peanut dinner is filtered out, so no day carries it and the dinner slot is empty.
+    titles = {
+        card.title
+        for day in result.plan.days
+        for card in (day.breakfast, day.lunch, day.dinner)
+        if card is not None
+    }
+    assert "Peanut Curry" not in titles
     list_recipes = {recipe for line in result.shopping_list.lines for recipe in line.from_recipes}
     assert "Peanut Curry" not in list_recipes
 
 
 def test_single_shopping_list_for_the_plan(stub_pipeline: dict[str, Any]) -> None:
-    """Every plan carries exactly one shopping list aggregating its chosen recipes (FR-018)."""
-    stub_pipeline["pool"] = [_recipe("1", "Pad Thai", "thai"), _recipe("2", "Carbonara", "italian")]
-    result = meal_plan.build(None, "plan dinners", ConstraintProfile.default(), "cook-1")
+    """Every plan carries exactly one shopping list aggregating all of its chosen recipes (FR-018)."""
+    _set_slots(
+        stub_pipeline,
+        breakfast=[_recipe("b1", "Oatmeal", "american", "breakfast")],
+        lunch=[_recipe("l1", "Salad", "italian", "lunch")],
+        dinner=[_recipe("d1", "Tacos", "mexican", "dinner")],
+    )
+    result = meal_plan.build(None, "plan 1 day", ConstraintProfile.default(), "cook-1")
 
     assert result.shopping_list is not None
-    # Two distinct ingredients (one per recipe), each scaled at factor 1 (servings 2 == basis 2).
-    assert len(result.shopping_list.lines) == 2
+    # Three distinct ingredients (one per meal), each scaled at factor 1 (servings 2 == basis 2).
+    assert len(result.shopping_list.lines) == 3

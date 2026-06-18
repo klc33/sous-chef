@@ -61,10 +61,18 @@ def screen(
     cleaned_reply = redaction.redact(response.reply)
     safe_recipes = [c for c in response.recipes if _card_clears_wall(c, cp, session)]
 
-    # Re-assert the wall on a meal plan's per-day recipes too (None until US3 builds planning).
+    # Re-assert the wall on a meal plan's per-day meal slots too (breakfast/lunch/dinner). Any slot whose
+    # card no longer clears the wall is nulled out individually rather than dropping the whole day.
     safe_plan: MealPlan | None = response.meal_plan
     if safe_plan is not None:
-        safe_days = [d for d in safe_plan.days if _card_clears_wall(d.recipe, cp, session)]
+        safe_days = []
+        for d in safe_plan.days:
+            cleared = {
+                slot: card
+                for slot in ("breakfast", "lunch", "dinner")
+                if (card := getattr(d, slot)) is not None and _card_clears_wall(card, cp, session)
+            }
+            safe_days.append(d.model_copy(update={"breakfast": None, "lunch": None, "dinner": None, **cleared}))
         safe_plan = safe_plan.model_copy(update={"days": safe_days})
 
     dropped = len(response.recipes) - len(safe_recipes)
