@@ -242,22 +242,39 @@ export default function App() {
     }
   }
 
-  // Toggle a favorite from any card/detail; optimistically reflect it and refresh the favorites list.
+  // Toggle a favorite from any card/detail. The heart flips IMMEDIATELY (optimistic) so a click feels
+  // instant — the grid cards read `favoriteIds`, so without this they wouldn't change until the save +
+  // refetch round-trip completed (~0.5s+), which reads as "nothing happened". We then reconcile with the
+  // server's authoritative list and roll the flip back if the call fails.
   async function handleToggleFavorite(id) {
     const isFav = favoriteIds.has(id);
     setError(null);
+
+    // Optimistic flip of the heart (and an open detail's heart) before the network call.
+    const flip = (add) =>
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (add) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+    flip(!isFav);
+    setDetail((d) => (d && d.id === id ? { ...d, is_favorite: !isFav } : d));
+
     try {
       if (isFav) {
         await api.removeFavorite(id);
       } else {
         await api.saveFavorite(id);
       }
+      // Reconcile with the server's wall-filtered list (also keeps the header count + favorites panel right).
       const favs = await api.listFavorites();
       setFavorites(favs);
       setFavoriteIds(new Set(favs.map((f) => f.id)));
-      // Keep an open detail's heart in sync.
-      setDetail((d) => (d && d.id === id ? { ...d, is_favorite: !isFav } : d));
     } catch (e) {
+      // Roll the optimistic flip back so the UI never lies about what's saved.
+      flip(isFav);
+      setDetail((d) => (d && d.id === id ? { ...d, is_favorite: isFav } : d));
       reportError(e);
     }
   }
