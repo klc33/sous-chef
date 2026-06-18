@@ -18,6 +18,7 @@ excluded from the variety count rather than padding it.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -33,6 +34,39 @@ from app.services.user.constraint_guard import ConstraintProfile
 # Default plan length and the variety target the spec asks for (≥3 distinct cuisines when the corpus allows).
 _DEFAULT_DAYS = 3
 _MIN_DISTINCT_CUISINES = 3
+
+# Upper bound on a cook-requested plan length, so an absurd ask ("plan 30 days") can't try to drain the
+# corpus or build a runaway shopping list. Requests above this are clamped down to it.
+_MAX_DAYS = 7
+
+# Small number words a cook might use for the plan length; digits are handled separately.
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "couple": 2, "few": 3,
+}
+
+# "<n> day(s)/dinner(s)/meal(s)/night(s)" — e.g. "2-day", "three dinners", "a couple of meals". The count
+# is a digit or a small number word; an optional dash and "of" cover "2-day" and "a couple of meals".
+_DAYS_REQUEST = re.compile(
+    r"\b(\d+|one|two|three|four|five|six|seven|couple|few)\b\s*-?\s*(?:of\s+)?"
+    r"(?:day|days|dinner|dinners|meal|meals|night|nights)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_requested_days(message: str) -> int:
+    """Pull the requested plan length from the message; default to `_DEFAULT_DAYS`, clamped to `_MAX_DAYS`.
+
+    Recognizes "<n> day(s)/dinner(s)/meal(s)/night(s)" with <n> as a digit or a small number word
+    ("2-day", "three dinners", "a couple of meals"). When no count is stated the default applies, and any
+    parsed value is clamped to [1, `_MAX_DAYS`] so a plan can never try to span the whole corpus.
+    """
+    match = _DAYS_REQUEST.search(message)
+    if match is None:
+        return _DEFAULT_DAYS
+    token = match.group(1).lower()
+    value = int(token) if token.isdigit() else _NUMBER_WORDS.get(token, _DEFAULT_DAYS)
+    return max(1, min(value, _MAX_DAYS))
 
 # Servings an unknown cook (no stored profile) is assumed to cook for — mirrors the rest of the app.
 _DEFAULT_SERVINGS = 2
@@ -157,23 +191,26 @@ def build(
     cp: ConstraintProfile,
     profile_id: str,
     *,
-    days: int = _DEFAULT_DAYS,
+    days: int | None = None,
 ) -> MealPlanResult:
     """Build an N-day, constraint-safe, variety-maximized meal plan with exactly one shopping list.
 
-    Resolves the cook's servings, gathers wall-cleared candidates (agent + deterministic top-up), selects
-    days to maximize distinct known cuisines, records the chosen recipes to seen-history (freshness), builds
-    the single consolidated/scaled shopping list, and composes a grounded reply. The plan's cards come
-    through `recipe_view` so the wall holds; an empty corpus yields an empty plan with an honest reply
-    rather than an invented one.
+    The plan length is the cook's requested count parsed from `message` ("2-day", "three dinners"),
+    defaulting to `_DEFAULT_DAYS` and clamped to `_MAX_DAYS`; an explicit `days` argument overrides the
+    parse (used by callers/tests that pin a length). Resolves the cook's servings, gathers wall-cleared
+    candidates (agent + deterministic top-up), selects days to maximize distinct known cuisines, records the
+    chosen recipes to seen-history (freshness), builds the single consolidated/scaled shopping list, and
+    composes a grounded reply. The plan's cards come through `recipe_view` so the wall holds; an empty corpus
+    yields an empty plan with an honest reply rather than an invented one.
     """
+    requested_days = days if days is not None else _parse_requested_days(message)
     servings = _resolve_servings(session, profile_id)
-    candidates = _gather_candidates(session, message, cp, profile_id, servings, days)
+    candidates = _gather_candidates(session, message, cp, profile_id, servings, requested_days)
     # Belt-and-suspenders wall pass: candidates already come from wall-cleared paths, but re-filtering here
     # guarantees the plan's cards, cuisine count, AND shopping list all operate on the SAME safe set — so a
     # violator can never reach the shopping list even if an upstream path regressed (golden rule #1).
     safe_candidates = constraint_guard.filter(candidates, cp)
-    selected = _select_for_variety(safe_candidates, days)
+    selected = _select_for_variety(safe_candidates, requested_days)
 
     # Cards via the wall choke point; order matches `selected` so day numbers line up with the chosen rows.
     cards = recipe_view.to_cards(selected, cp)
@@ -182,7 +219,7 @@ def build(
     plan = MealPlan(
         days=plan_days,
         distinct_cuisines=distinct,
-        shortfall_note=_shortfall_note(selected, distinct, days),
+        shortfall_note=_shortfall_note(selected, distinct, requested_days),
     )
 
     # Record the chosen recipes so a later plan/search stays fresh (favorites exempt; de-duped in freshness).

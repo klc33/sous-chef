@@ -22,15 +22,27 @@ from app.services.user.constraint_guard import ConstraintProfile
 
 __all__ = ["suggest", "from_message", "extract_ingredient"]
 
-# Phrasings that name the target ingredient after a "swap" cue. First capture group is the ingredient;
-# we stop at punctuation / trailing question words so "instead of butter?" yields just "butter".
+# A captured ingredient ends at the first natural boundary: end of string, punctuation, a spaced dash
+# clause, or a connector word that begins a trailing clause ("eggs for baking" → "eggs"). This keeps the
+# capture to the ingredient itself instead of swallowing the rest of the sentence, so a cue in the MIDDLE
+# of a message ("I'm out of eggs for baking — what's a safe replacement?") parses as well as one at the end.
+_STOP = (
+    r"(?=$|[?.!,;:]|\s+[—–-]\s+|"
+    r"\s+(?:for|in|to|with|when|while|please|today|tonight|because|since|that|but)\b)"
+)
+
+# Phrasings that name the target ingredient after a "swap" cue. First capture group is the ingredient,
+# bounded by `_STOP`. Tried in order; the first match wins.
 _EXTRACT_PATTERNS = [
-    re.compile(r"instead of\s+(.+?)[\s]*[?.!]*$", re.IGNORECASE),
-    re.compile(r"substitut\w*\s+for\s+(.+?)[\s]*[?.!]*$", re.IGNORECASE),
-    re.compile(r"replace(?:ment for)?\s+(.+?)[\s]*[?.!]*$", re.IGNORECASE),
-    re.compile(r"swap\s+(?:out\s+)?(.+?)[\s]*[?.!]*$", re.IGNORECASE),
-    re.compile(r"alternative\s+(?:to|for)\s+(.+?)[\s]*[?.!]*$", re.IGNORECASE),
-    re.compile(r"don't have\s+(?:any\s+)?(.+?)[\s]*[?.!]*$", re.IGNORECASE),
+    re.compile(r"instead of\s+(.+?)" + _STOP, re.IGNORECASE),
+    re.compile(r"substitut\w*\s+for\s+(.+?)" + _STOP, re.IGNORECASE),
+    re.compile(r"replace(?:ment for)?\s+(.+?)" + _STOP, re.IGNORECASE),
+    re.compile(r"swap\s+(?:out\s+)?(.+?)" + _STOP, re.IGNORECASE),
+    re.compile(r"alternative\s+(?:to|for)\s+(.+?)" + _STOP, re.IGNORECASE),
+    # "(I'm / ran / we're) out of X", "no more X" — the cook signalling a missing ingredient.
+    re.compile(r"(?:ran\s+|i'?m\s+|we'?re\s+)?out of\s+(.+?)" + _STOP, re.IGNORECASE),
+    re.compile(r"no more\s+(.+?)" + _STOP, re.IGNORECASE),
+    re.compile(r"don'?t have\s+(?:any\s+)?(.+?)" + _STOP, re.IGNORECASE),
 ]
 
 
