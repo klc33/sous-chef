@@ -45,16 +45,18 @@ curl -s -X POST localhost:8000/chat -H "X-Profile-ID: cook-demo-1" -H "Content-T
 exhausted, after which seen-history resets and results resume — never an empty dead-end). A favorited
 recipe still appears (favorites are exempt). A *different* profile-ID is unaffected by this cook's history.
 
-## Story 3 — Varied meal plan + one scaled shopping list (P3)
+## Story 3 — Breakfast/lunch/dinner meal plan + one scaled shopping list (P3)
 
 ```powershell
 curl -s -X POST localhost:8000/chat -H "X-Profile-ID: cook-demo-1" `
-  -H "Content-Type: application/json" -d '{"message":"plan 3 days of dinners"}'
+  -H "Content-Type: application/json" -d '{"message":"plan 3 days of meals"}'
 ```
-**Expect**: `intent="plan_meals"`, a `meal_plan` with `distinct_cuisines >= 3` (unknown-cuisine recipes
-don't count), **every** recipe constraint-safe, and **exactly one** `shopping_list` whose ingredients are
-deduplicated across recipes and scaled to the cook's servings. If the corpus can't supply 3 cuisines /
-the full length, expect a `shortfall_note` rather than padding or unsafe recipes.
+**Expect**: `intent="plan_meals"`, a `meal_plan` whose every `days[]` entry has a `breakfast`, `lunch`, and
+`dinner` card (each from the matching category), **every** recipe constraint-safe, and **exactly one**
+`shopping_list` whose ingredients are deduplicated across recipes and scaled to the cook's servings. A
+`distinct_cuisines` count is reported across the chosen recipes. If the corpus can't fill a meal for every
+day / the full length, expect a `shortfall_note` (and any unfillable slot left null) rather than padding or
+unsafe recipes.
 
 ## Story 4 — Allergen-safe substitution (P3)
 
@@ -93,7 +95,7 @@ make evals           # classifier macro-F1, RAG hit@k, redteam refusal=1.0, reda
 | Criterion | Where validated |
 |---|---|
 | SC-001 same query → 0 overlap | Story 2 + `tests/unit/test_freshness.py` |
-| SC-002 plan ≥3 cuisines / 1 scaled deduped list | Story 3 + `tests/unit/test_shopping_list.py` |
+| SC-002 plan has breakfast/lunch/dinner per day / 1 scaled deduped list | Story 3 + `tests/unit/test_meal_plan.py` + `tests/unit/test_shopping_list.py` |
 | SC-003 100% manipulation refused | Story 5 + `evals/redteam/attempts.yaml` |
 | SC-004 0 allergen-leaking substitutions | Story 4 + `tests/unit/test_substitution.py` |
 | SC-005 0 invented recipes/steps | Stories 1/3 + grounding (verbatim steps, stored rows) |

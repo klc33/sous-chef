@@ -64,11 +64,15 @@ These are Pydantic/dataclass objects created per turn. Validation rules trace to
   **top-3 selected** — so 3 compliant cards surface whenever they exist; honest empty when no compliant
   match (FR-005..013). Surfaced ids are recorded to `seen_history`.
 
-### MealPlan (agent output)
-- `days: list[MealPlanDay]` where `MealPlanDay = { day: int, recipe: RecipeCard }`
-- `distinct_cuisines: int` (≥3 when corpus allows; `null`/"unknown" cuisines don't count)
-- `shortfall_note: str | None` (set when length or ≥3-cuisine variety can't be met — FR-017)
-- Invariants: every recipe wall-safe; freshness-aware; exactly one `ShoppingList`. (FR-014..017)
+### MealPlan (deterministic per-category output)
+- `days: list[MealPlanDay]` where `MealPlanDay = { day: int, breakfast: RecipeCard | None,
+  lunch: RecipeCard | None, dinner: RecipeCard | None }` — one recipe per fixed meal category, each
+  optional (null only when the corpus can't fill that slot for the day)
+- `distinct_cuisines: int` (count across all chosen recipes; `null`/"unknown" cuisines don't count)
+- `shortfall_note: str | None` (set when the requested length or a per-day meal slot can't be filled — FR-017)
+- Invariants: each meal slot built through `recipe_view`/`constraint_guard` so every recipe is wall-safe;
+  each category retrieved fresh (freshness-aware, no repeats within the plan); exactly one `ShoppingList`
+  over all chosen recipes. (FR-014..018)
 
 ### ShoppingList (meal-plan output)
 - `lines: list[ShoppingLine]` where `ShoppingLine = { ingredient: str, quantity: float | None,

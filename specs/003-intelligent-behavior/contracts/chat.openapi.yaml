@@ -100,17 +100,20 @@ components:
           type: array
           items:
             type: object
-            required: [day, recipe]
+            required: [day]
+            description: One day of the plan — a breakfast, lunch, and dinner (each null if unfillable).
             properties:
               day: { type: integer, minimum: 1 }
-              recipe: { $ref: '#/components/schemas/RecipeCard' }
+              breakfast: { $ref: '#/components/schemas/RecipeCard', nullable: true }
+              lunch: { $ref: '#/components/schemas/RecipeCard', nullable: true }
+              dinner: { $ref: '#/components/schemas/RecipeCard', nullable: true }
         distinct_cuisines:
           type: integer
-          description: Count of distinct KNOWN cuisines (>=3 when corpus allows; "unknown" never counts).
+          description: Count of distinct KNOWN cuisines across all chosen recipes ("unknown" never counts).
         shortfall_note:
           type: string
           nullable: true
-          description: Set when the requested length or >=3 distinct cuisines could not be met.
+          description: Set when the requested length or a per-day meal slot could not be filled.
     ShoppingList:
       type: object
       description: Exactly one consolidated, deduplicated, serving-scaled list for the whole plan.

@@ -84,23 +84,25 @@ freshness.
 
 ### User Story 3 - Varied multi-day meal plan with one scaled shopping list (Priority: P3)
 
-A cook asks for a multi-day meal plan — e.g., "plan 3 days of dinners" — and receives a plan that
-**varies across cuisines**, with every recipe constraint-safe, plus **one consolidated, deduplicated
-shopping list scaled to the cook's serving size**. This is a multi-step request handled by the bounded
-agent, which retrieves recipes, assembles a varied plan, and builds the list.
+A cook asks for a multi-day meal plan — e.g., "plan 3 days of meals" — and receives a plan where **each
+day has a breakfast, a lunch, and a dinner**, with every recipe constraint-safe, plus **one consolidated,
+deduplicated shopping list scaled to the cook's serving size**. Because every recipe carries one fixed
+category at ingestion (`breakfast | lunch | dinner | hot_drink | cold_drink`), the plan is assembled
+deterministically: a fresh, wall-cleared retrieval per meal category, paired by day, then one shopping list.
 
-**Why this priority**: Meal planning is the marquee "hard intent" that justifies the agent — it composes
-retrieval, variety, and list-building into one deliverable. It is high value but depends on reliable
-retrieval (US1) and freshness (US2) underneath, so it follows them.
+**Why this priority**: Meal planning is the marquee "hard intent" — it composes per-category retrieval,
+freshness, and list-building into one deliverable. It is high value but depends on reliable retrieval (US1)
+and freshness (US2) underneath, so it follows them.
 
-**Independent Test**: Request a multi-day plan and confirm it spans at least three distinct cuisines, that
-every recipe in it is constraint-safe, and that it yields exactly one shopping list in which duplicate
+**Independent Test**: Request a multi-day plan and confirm each day carries a breakfast, lunch, and dinner,
+that every recipe in it is constraint-safe, and that it yields exactly one shopping list in which duplicate
 ingredients across recipes are merged and quantities are scaled to the cook's servings.
 
 **Acceptance Scenarios**:
 
-1. **Given** a cook asks for a multi-day meal plan, **When** it is produced, **Then** the plan includes
-   recipes from **at least three distinct cuisines**.
+1. **Given** a cook asks for a multi-day meal plan, **When** it is produced, **Then** each day includes a
+   **breakfast, a lunch, and a dinner** recipe (each drawn from the matching category), as far as the
+   compliant corpus can fill them.
 2. **Given** a cook with stated allergies/diet asks for a plan, **When** it is produced, **Then** every
    recipe in the plan is constraint-safe (zero violations).
 3. **Given** a produced plan, **When** the shopping list is generated, **Then** there is exactly **one**
@@ -174,10 +176,9 @@ system to emit a constraint-violating recipe or to abandon its instructions.
   recipe.
 - **Pool exhaustion under freshness**: when every compliant recipe for a request has been seen, the
   seen-history for that pool resets so the cook keeps getting results rather than an empty list.
-- **Not enough cuisine variety for a plan**: if the compliant corpus cannot supply three distinct
-  cuisines for the requested plan length (recipes with "unknown" cuisine do not count toward the three),
-  the system returns the maximum variety it safely can and tells the cook, rather than padding with
-  duplicates or unsafe recipes.
+- **A meal slot can't be filled for a day**: if the compliant corpus runs out of recipes for a meal
+  category (e.g. only two safe breakfasts for a three-day plan), the system leaves that slot empty on the
+  affected day and tells the cook, rather than padding with duplicates or unsafe recipes.
 - **Plan length vs. available recipes**: a requested plan longer than the available compliant pool is
   filled as far as safely possible with an honest note about the shortfall.
 - **Agent hits its bound**: if the bounded agent reaches its iteration or token cap before finishing, it
@@ -203,9 +204,10 @@ system to emit a constraint-violating recipe or to abandon its instructions.
   seen-set per cook (profile-ID): a recipe shown on any request/path is excluded from future retrievals
   until the current request has no unseen compliant matches, at which point the seen-history resets so
   results keep flowing. Favorites are exempt.
-- Q: How is cuisine sourced for the ≥3-distinct-cuisines rule, and how are recipes lacking it handled?
+- Q: How is cuisine sourced for the plan's distinct-cuisine count, and how are recipes lacking it handled?
   → A: Read cuisine from existing corpus metadata (no Phase 2 corpus change); recipes without a known
-  cuisine stay eligible but count as "unknown" and do not contribute to the distinct-cuisine count.
+  cuisine stay eligible but count as "unknown" and do not contribute to the distinct-cuisine count. (The
+  count is reported informationally; the plan is structured by meal category, not by a cuisine target.)
 - Q: How many recipe cards does a single conversational search return? → A: Up to 3 ranked cards per
   response.
 
@@ -267,17 +269,19 @@ system to emit a constraint-violating recipe or to abandon its instructions.
 
 **Meal plan**
 
-- **FR-014**: A cook MUST be able to request a multi-day meal plan, and the resulting plan MUST include
-  recipes spanning **at least three distinct cuisines**. Cuisine MUST be read from existing corpus
-  metadata (no Phase 2 corpus change); recipes without a known cuisine remain eligible but count as
-  "unknown" and MUST NOT contribute to the distinct-cuisine count.
+- **FR-014**: A cook MUST be able to request a multi-day meal plan, and **each day of the resulting plan
+  MUST include a breakfast, a lunch, and a dinner** recipe, each drawn from the matching fixed category
+  (`breakfast | lunch | dinner`). A day's meal slot MAY be left empty only when the compliant corpus
+  cannot supply a recipe for that category/day (disclosed per FR-017), never padded or invented.
 - **FR-015**: Every recipe in a produced meal plan MUST be constraint-safe (subject to the wall, zero
-  violations).
+  violations) — enforced on every meal slot.
 - **FR-016**: A produced meal plan MUST respect freshness, favoring recipes the cook has not already seen
-  until the pool is exhausted.
-- **FR-017**: When the compliant corpus cannot supply the requested length or three distinct cuisines, the
-  system MUST return the maximum safe variety available and disclose the shortfall, never padding with
-  duplicates or unsafe recipes.
+  until the pool is exhausted; each meal category is retrieved fresh and recipes are not repeated within
+  the plan. Cuisine is read from existing corpus metadata and reported as a distinct-cuisine count across
+  all chosen recipes (recipes without a known cuisine count as "unknown" and do not contribute).
+- **FR-017**: When the compliant corpus cannot supply the requested length, or cannot fill a meal slot for
+  every day, the system MUST return what it can (capping the length to the best-covered meal so no fully
+  empty day is shown) and disclose the shortfall, never padding with duplicates or unsafe recipes.
 
 **Shopping list**
 
@@ -345,8 +349,9 @@ system to emit a constraint-violating recipe or to abandon its instructions.
 - **Seen-History**: a single global per-cook (profile-ID) record of which recipes have already been served
   across all requests/paths, used to exclude repeats until the current request has no unseen compliant
   matches, at which point it resets; favorites are exempt.
-- **Meal Plan**: a multi-day set of constraint-safe recipes selected for cuisine variety (≥3 distinct
-  cuisines), scoped to a cook and a requested length.
+- **Meal Plan**: a multi-day plan where each day carries a constraint-safe breakfast, lunch, and dinner
+  (one recipe per fixed meal category), scoped to a cook and a requested length, with a distinct-cuisine
+  count reported across the chosen recipes.
 - **Shopping List**: the single consolidated, deduplicated, serving-scaled set of ingredients derived from
   all recipes in a meal plan.
 - **Substitution Suggestion**: one or more allergen-safe replacement ingredients for a given ingredient,
@@ -363,9 +368,9 @@ system to emit a constraint-violating recipe or to abandon its instructions.
 - **SC-001**: Issuing the **same request twice** in succession returns result sets with **zero
   overlapping recipes**, until the compliant pool is exhausted (then the history resets and results
   resume).
-- **SC-002**: A multi-day meal-plan request yields a plan spanning **at least 3 distinct cuisines**, with
-  **100%** of its recipes constraint-safe and **exactly one** consolidated, deduplicated, serving-scaled
-  shopping list.
+- **SC-002**: A multi-day meal-plan request yields a plan where **each day carries a breakfast, lunch, and
+  dinner** (as far as the compliant corpus can fill), with **100%** of its recipes constraint-safe and
+  **exactly one** consolidated, deduplicated, serving-scaled shopping list.
 - **SC-003**: **100%** of allergen-override, prompt-injection, and jailbreak probes in the safety battery
   are refused, with **zero** constraint-violating recipes or instruction-abandoning content emitted.
 - **SC-004**: **0** substitution suggestions introduce an allergen the cook has declared, measured across
@@ -397,15 +402,19 @@ system to emit a constraint-violating recipe or to abandon its instructions.
 - **Results per search.** A conversational search returns **up to 3 ranked recipe cards** per response.
 - **Substitutions are curated, not generated.** Substitute suggestions come from a curated deterministic
   ingredient→substitute map, then wall-filtered; the system never free-form-invents a substitute.
-- **Meal-plan length.** A plan covers the number of days the cook requests; when unspecified, a sensible
-  default of **3 days** is used. Cuisine variety targets at least three distinct cuisines regardless of
-  length, subject to what the compliant corpus can supply.
+- **Meal-plan length.** A plan covers the number of days the cook requests (capped to a sane maximum);
+  when unspecified, a sensible default of **3 days** is used. The length is further capped to what the
+  best-covered meal category can fill, so no fully empty day is shown.
+- **Meal slots per day.** Each day has three slots — **breakfast, lunch, dinner** — filled from the
+  matching fixed category. A slot is left empty (and disclosed) only when the compliant corpus runs out for
+  that category; the distinct-cuisine count is reported across the chosen recipes but is not a fill target.
 - **Serving scaling** reuses the cook's default serving size from their profile (Phase 2) for shopping-list
   quantities, consistent with how Phase 2 scales nutrition.
 - **Cuisine** is taken from recipe metadata already available in the corpus (e.g., source-provided area /
-  cuisine); the five fixed categories from Phase 2 are distinct from cuisine and continue to gate
-  category intent. Recipes lacking cuisine metadata remain eligible for plans but count as "unknown" and
-  do not contribute to the ≥3 distinct-cuisine requirement; the Phase 2 corpus is not modified here.
+  cuisine); the five fixed categories from Phase 2 are distinct from cuisine — the plan is **structured by
+  meal category** (breakfast/lunch/dinner), while cuisine only feeds the reported distinct-cuisine count.
+  Recipes lacking cuisine metadata remain eligible for plans but count as "unknown" and do not contribute
+  to that count; the Phase 2 corpus is not modified here.
 - **Hosted inference only.** The LLM (chat) and embeddings (retrieval) are hosted-API calls; the intent
   classifier is trained offline and served lightweight. No deep-learning weights run in-process for
   generation, embedding, or classification at serve time.
