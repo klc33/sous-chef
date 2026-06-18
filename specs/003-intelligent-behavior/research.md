@@ -143,23 +143,26 @@ auditable and wall-governed.
 **Alternatives considered**: a heavyweight agent framework (rejected — Principle I/X; one bounded loop is
 enough); unbounded ReAct text parsing (rejected — fragile, unsafe without hard caps).
 
-## 8. Meal plan: cuisine variety algorithm
+## 8. Meal plan: per-category assembly algorithm
 
-**Decision**: `services/user/meal_plan.py` produces an N-day plan (default **3 days** when unspecified). It
-retrieves compliant candidates (wall + freshness) and selects to **maximize distinct known cuisines**,
-guaranteeing **≥3 distinct cuisines** when the compliant corpus allows. Recipes with `cuisine IS NULL`
-are eligible but **count as "unknown" and never satisfy a distinct-cuisine slot**. If ≥3 distinct cuisines
-or the full length can't be met, return the maximum safe variety and a **shortfall note** (FR-017). The
-plan is assembled via the agent's tools on the `plan_meals` route (the agent calls `search_recipes` per
-cuisine/day then `build_shopping_list`); the selection heuristic itself is deterministic so variety is
-testable.
+**Decision**: `services/user/meal_plan.py` produces an N-day plan (default **3 days** when unspecified)
+where **each day has a breakfast, a lunch, and a dinner**. Because every recipe carries one fixed category
+at ingestion, assembly is a deterministic **per-category retrieval**: for each meal category it runs a
+fresh, wall-cleared retrieval (`rag.fresh_cards`, category-filtered, k = requested days) and pairs the
+results by day (day _i_ = the _i_-th breakfast/lunch/dinner). The length is capped to what the
+best-covered meal category can fill, so no fully empty day is shown; a slot the corpus can't fill is left
+empty and disclosed via a **shortfall note** (FR-017). A `distinct_cuisines` count is reported across the
+chosen recipes (recipes with `cuisine IS NULL` count as "unknown" and don't contribute), but it is
+informational, not a fill target. Everything runs deterministically (no LLM in the plan path), so the
+structure and safety are fully testable.
 
-**Rationale**: Deterministic variety selection keeps SC-002 testable while the agent orchestrates. Using
-the existing nullable `cuisine` column avoids any Phase 2 corpus change (clarified).
+**Rationale**: Per-category retrieval maps directly onto the fixed category metadata and gives a reliable,
+structured breakfast/lunch/dinner plan without trusting an LLM to produce the structure — keeping SC-002
+testable and the plan grounded. Reusing `rag.fresh_cards` inherits the wall and freshness for free.
 
-**Alternatives considered**: pure-LLM plan composition (rejected — un-grounded, hard to guarantee ≥3
-distinct cuisines or safety); ignoring unknown-cuisine recipes entirely (rejected — shrinks the pool;
-clarified to keep them eligible but non-counting).
+**Alternatives considered**: pure-LLM / bounded-agent plan composition (rejected — un-grounded, can't
+reliably guarantee one recipe per meal category or safety); the earlier single-recipe-per-day design that
+maximized distinct cuisines (superseded — cooks want a full day of meals, not one dish).
 
 ## 9. Shopping list: dedupe, units, scaling
 

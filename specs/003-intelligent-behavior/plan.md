@@ -76,8 +76,8 @@ query + one LLM ranking/explanation call); the agent/meal-plan path is multi-too
 **Constraints**: The wall is deterministic code on EVERY new output path (SC-006) via the single
 `recipe_view`→`constraint_guard` choke point; grounding — cards/plans/steps come only from stored rows,
 substitutions only from a curated map, never invented (SC-005); same request twice → zero overlap until
-pool exhaustion (SC-001); meal plan ≥3 distinct cuisines, all safe, exactly one scaled deduped list
-(SC-002); 100% of red-team probes refused (SC-003); agent bounded in iterations + tokens, schema-validated
+pool exhaustion (SC-001); meal plan has a breakfast/lunch/dinner per day, all safe, exactly one scaled
+deduped list (SC-002); 100% of red-team probes refused (SC-003); agent bounded in iterations + tokens, schema-validated
 tool inputs (SC-007); hosted inference only; classifier served via joblib (no torch); profile-ID from
 header only.
 
@@ -158,7 +158,7 @@ app/
 │   │   ├── freshness.py          # NEW: exclude_seen / record_seen / reset_if_exhausted (single global per-cook set; favorites exempt)
 │   │   ├── router.py             # NEW: classify(message) → route easy→workflow / hard→agent / out_of_scope→refusal
 │   │   ├── workflow.py           # NEW: deterministic handlers for find_recipe, nutrition_q, substitution, chitchat
-│   │   ├── meal_plan.py          # NEW: drive the agent (or deterministic planner) → ≥3-cuisine safe plan → shopping_list
+│   │   ├── meal_plan.py          # NEW: deterministic per-category retrieval → breakfast/lunch/dinner per day → shopping_list
 │   │   ├── shopping_list.py      # NEW: aggregate+dedupe ingredients across plan, merge compatible units, scale to servings
 │   │   └── substitution.py       # NEW: curated ingredient→substitutes map, wall-filtered; honest "no safe substitute"
 │   └── shared/

@@ -135,22 +135,22 @@ Single FastAPI monolith at repo root: `app/`, `alembic/`, `ingestion/`, `ml/`, `
 
 ---
 
-## Phase 6: User Story 3 — Varied meal plan + one scaled shopping list (Priority: P3)
+## Phase 6: User Story 3 — Breakfast/lunch/dinner meal plan + one scaled shopping list (Priority: P3)
 
-**Goal**: A multi-day plan spanning ≥3 distinct cuisines, all constraint-safe, with exactly one consolidated, deduplicated, serving-scaled shopping list — produced by the bounded agent.
+**Goal**: A multi-day plan where each day has a breakfast, lunch, and dinner, all constraint-safe, with exactly one consolidated, deduplicated, serving-scaled shopping list — assembled deterministically by a per-category retrieval (no LLM in the plan path).
 
-**Independent Test**: `POST /chat {"message":"plan 3 days of dinners"}` → `meal_plan.distinct_cuisines >= 3`, every recipe safe, one `shopping_list` deduped + scaled; shortfall noted when the corpus can't supply variety; the agent always stays within its bounds.
+**Independent Test**: `POST /chat {"message":"plan 3 days of meals"}` → every `meal_plan.days[]` has a `breakfast`, `lunch`, and `dinner`, every recipe safe, one `shopping_list` deduped + scaled; shortfall noted (and a slot left null) when the corpus can't fill a meal for every day.
 
 - [X] T041 [P] [US3] Author `prompts/agent_system.md`: bounded tool-use rules; act only through tools; never invent recipes/steps.
 - [X] T042 [US3] Implement `app/agent/tools.py` tools `search_recipes`, `get_recipe`, `get_nutrition`, `build_shopping_list`: each validates its `schemas/tools.py` input, calls the matching service, and wall-clears any recipe output via `recipe_view` (depends T018, T025).
 - [X] T043 [US3] Implement `app/agent/loop.py`: bounded tool-calling loop via `infra.llm_groq.chat(tools=..., model=settings.groq_agent_model)` (the stronger model for reliable multi-tool calling); cap `agent_max_iterations` + token budget; return best safe partial (or honest failure) on bound (depends T007, T041, T042).
 - [X] T044 [US3] Implement `app/services/user/shopping_list.py`: aggregate ingredients across plan recipes, name-normalize to dedupe, merge compatible units (mass/volume/count families), scale to the cook's servings, emit incompatible-unit duplicates as separate labeled lines; exactly one list.
-- [X] T045 [US3] Implement `app/services/user/meal_plan.py`: build an N-day plan (default 3) maximizing distinct **known** cuisines (≥3 when the compliant corpus allows; `cuisine IS NULL` never counts), wall + freshness applied, `shortfall_note` when length/variety can't be met, then one `shopping_list` (depends T043, T044).
+- [X] T045 [US3] Implement `app/services/user/meal_plan.py`: build an N-day plan (default 3, capped) where each day has a breakfast/lunch/dinner via a fresh, wall-cleared **per-category retrieval** (`rag.fresh_cards` per category, paired by day); length capped to the best-covered meal; `shortfall_note` (and null slot) when a meal/day can't be filled; report `distinct_cuisines` across chosen recipes; then one `shopping_list` (depends T044). _(Superseded the original distinct-cuisine, single-recipe-per-day, agent-driven design.)_
 - [X] T046 [US3] Wire `plan_meals` → `meal_plan` via `router`/`workflow`/`chat`; populate `ChatResponse.meal_plan` + `shopping_list` (depends T019, T045).
 - [X] T047 [P] [US3] Populate `evals/agent_tool_selection/cases.yaml` (message → expected tool(s)) and confirm it runs in `evals/run_evals.py`.
 - [X] T048 [P] [US3] Extend `tests/unit/test_shopping_list.py`: dedupe + compatible-unit merge + scaling + incompatible-unit split + exactly one list.
-- [X] T049 [P] [US3] Unit test `tests/unit/test_meal_plan.py`: ≥3 distinct cuisines when possible; unknown-cuisine not counted; shortfall note; all recipes wall-safe.
-- [X] T050 [US3] Extend `tests/integration/test_chat_flow.py`: a 3-day plan returns ≥3 cuisines, all safe, one scaled deduped list.
+- [X] T049 [P] [US3] Unit test `tests/unit/test_meal_plan.py`: each day has breakfast/lunch/dinner; requested length parsed + capped; shortfall note when a meal/day can't fill; all recipes wall-safe.
+- [X] T050 [US3] Extend `tests/integration/test_chat_flow.py`: a 3-day plan returns a breakfast/lunch/dinner per day, all safe, one scaled deduped list.
 - [X] T051 [US3] Extend `tests/integration/test_wall_regression.py` to enumerate the **agent tool** and **meal_plan** recipe paths.
 
 **Checkpoint**: Meal planning + shopping list work via the bounded agent; the wall holds on the agent paths.
@@ -253,7 +253,7 @@ Task: "Author prompts/recipe_explainer.md (T024)"
 2. US1 → ranked discovery (MVP) → demo.
 3. US2 → freshness on repeat → demo.
 4. US5 → manipulation refused (red-team gate green) → demo.
-5. US3 → meal plan + shopping list (the agent) → demo.
+5. US3 → breakfast/lunch/dinner meal plan + one shopping list → demo.
 6. US4 → allergen-safe substitution → demo.
 7. Polish → finalize gates + docs + full-stack quickstart.
 
